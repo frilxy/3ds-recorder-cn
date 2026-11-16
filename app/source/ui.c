@@ -14,6 +14,11 @@
 #define TEXT_BUF_GLYPHS 4096
 
 static C2D_Font fonts[2];
+
+/* Chinese characters carry many more strokes than Latin letters, so the smallest sizes get a
+ * pixel back or they turn to mush. Widths are measured through the same helper, so wrapping,
+ * centring and the segmented controls follow it; one number to change if it reads too small. */
+static float ui_px(float px) { return i18n_language() == LANG_ZH && px < 10.0f ? px + 1.0f : px; }
 static C2D_TextBuf text_buf;
 /* Measuring parses text too; a buffer of its own, emptied per call, keeps word wrap from
  * eating the frame's buffer one trial line at a time. */
@@ -64,7 +69,9 @@ static bool parse(C2D_Text *text, FontWeight weight, const char *str)
 float ui_text_width(float px, FontWeight weight, const char *str)
 {
     C2D_Text text;
-    float w = 0, h = 0, s = px / FONT_EM;
+    float w = 0, h = 0;
+    px = ui_px(px);
+    const float s = px / FONT_EM;
     C2D_TextBufClear(measure_buf);
     if (C2D_TextFontParse(&text, ui_font(weight), measure_buf, str))
         C2D_TextGetDimensions(&text, s, s, &w, &h);
@@ -74,7 +81,9 @@ float ui_text_width(float px, FontWeight weight, const char *str)
 float ui_text(float x, float y, float px, FontWeight weight, u32 color, const char *str)
 {
     C2D_Text text;
-    float w = 0, h = 0, s = px / FONT_EM;
+    float w = 0, h = 0;
+    px = ui_px(px);
+    const float s = px / FONT_EM;
     if (!parse(&text, weight, str))
         return 0;
     C2D_TextGetDimensions(&text, s, s, &w, &h);
@@ -181,7 +190,8 @@ static float wrap(float x, float y, float width, float px, FontWeight weight, u3
 {
     char line[256], trial[256];
     size_t line_len = 0;
-    float line_h = px * LINE_HEIGHT, cy = y;
+    const float line_h = ui_px(px) * LINE_HEIGHT;
+    float cy = y;
     int lines = 0;
     const char *p = str;
     line[0] = 0;
