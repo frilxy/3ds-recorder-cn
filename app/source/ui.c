@@ -24,15 +24,6 @@ static C2D_TextBuf text_buf;
  * eating the frame's buffer one trial line at a time. */
 static C2D_TextBuf measure_buf;
 
-/* Chinese is drawn with the console's own font instead of Inter: the romfs sheets only carry
- * Latin, Greek and Cyrillic, and the shared font is the one place Chinese glyphs always come from
- * (it is the font the HOME Menu itself uses). citro2d takes a NULL font as "the system font", and
- * it is already mapped by the time anything is drawn: C2D_TextBufNew maps it. */
-static C2D_Font ui_font(FontWeight weight)
-{
-    return i18n_language() == LANG_ZH ? NULL : fonts[weight];
-}
-
 bool ui_init(void)
 {
     fonts[FONT_REG] = C2D_FontLoad("romfs:/font/inter_500.bcfnt");
@@ -57,44 +48,133 @@ void ui_frame_begin(void)
 }
 
 /* ---------------------------------------------------------------- text */
-
-static bool parse(C2D_Text *text, FontWeight weight, const char *str)
+/* One UTF-8 character: its length in bytes (1 on a broken sequence) and its code point. */
+static size_t u8_len(const char *s)
 {
-    if (!C2D_TextFontParse(text, ui_font(weight), text_buf, str))
-        return false;
-    C2D_TextOptimize(text);
-    return true;
+    const unsigned char c = (unsigned char)*s;
+    if (c < 0x80)
+        return 1;
+    if ((c & 0xE0) == 0xC0)
+        return 2;
+    if ((c & 0xF0) == 0xE0)
+        return 3;
+    if ((c & 0xF8) == 0xF0)
+        return 4;
+    return 1;
+}
+
+static unsigned u8_code(const char *s, size_t n)
+{
+    const unsigned char c = (unsigned char)s[0];
+    if (n == 1)
+        return c;
+    if (n == 2)
+        return ((c & 0x1Fu) << 6) | ((unsigned char)s[1] & 0x3Fu);
+    if (n == 3)
+        return ((c & 0x0Fu) << 12) | (((unsigned char)s[1] & 0x3Fu) << 6) | ((unsigned char)s[2] & 0x3Fu);
+    return ((c & 0x07u) << 18) | (((unsigned char)s[1] & 0x3Fu) << 12) | (((unsigned char)s[2] & 0x3Fu) << 6) |
+           ((unsigned char)s[3] & 0x3Fu);
+}
+
+/* Characters the shared font is the natural home of: CJK ideographs, kana, CJK and full-width
+ * punctuation. Chinese is drawn from the console's own font (the one the HOME Menu uses): the
+ * romfs sheets only carry Latin, Greek and Cyrillic. citro2d takes a NULL font as "the system
+ * font", already mapped by the time anything is drawn (C2D_TextBufNew maps it). */
+static bool cjk_char(unsigned cp)
+{
+    return (cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE30 && cp <= 0xFE4F) ||
+           (cp >= 0xFF00 && cp <= 0xFF60) || cp == 0x3000 || (cp >= 0x3000 && cp <= 0x303F);
+}
+
+/* Whether a font really has a glyph for this character: libctru answers with the font's
+ * alterCharIndex (its own box glyph) for one it does not have, and -1 when it cannot tell. */
+static bool font_has(C2D_Font font, unsigned cp)
+{
+    const int index = C2D_FontGlyphIndexFromCodePoint(font, cp);
+    return index >= 0 && (unsigned)index != C2D_FontGetInfo(font)->alterCharIndex;
+}
+
+/* The font that draws one character. Chinese takes the console's own font; Latin, digits and
+ * symbols stay in Inter as designed — the shared font has no "≈" and no Ukrainian "ї", which is
+ * what used to come out as a box. A character Inter in turn lacks falls back to the shared font. */
+static C2D_Font char_font(FontWeight weight, const char *s, size_t n)
+{
+    if (i18n_language() != LANG_ZH)
+        return fonts[weight];
+    const unsigned cp = u8_code(s, n);
+    if (!cjk_char(cp) && fonts[weight] && font_has(fonts[weight], cp))
+        return fonts[weight];
+    return NULL;
+}
+
+/* Draws (or only measures) a string run by run, each run in the font that covers it. Runs are cut
+ * into fixed-size chunks for C2D_TextFontParse, at character boundaries and never across a run or
+ * a '\n'. Returns the width of the widest line. */
+static float text_runs(float x, float y, float px, FontWeight weight, u32 color, const char *str, bool paint,
+                       C2D_TextBuf buf)
+{
+    px = ui_px(px);
+    const float s = px / FONT_EM;
+    const float line_h = px * LINE_HEIGHT;
+    const float dy = TEXT_NUDGE * px / 12;
+    float cx = x, cy = y, widest = 0;
+    char chunk[256];
+    const char *p = str;
+    while (p && *p) {
+        if (*p == '\n') {
+            if (cx - x > widest)
+                widest = cx - x;
+            cx = x;
+            cy += line_h;
+            p++;
+            continue;
+        }
+        const C2D_Font font = char_font(weight, p, u8_len(p));
+        size_t len = 0;
+        while (p[len] && p[len] != '\n' && len + u8_len(p + len) < sizeof(chunk)) {
+            const size_t n = u8_len(p + len);
+            if (char_font(weight, p + len, n) != font)
+                break;
+            len += n;
+        }
+        if (!len) /* cannot happen with the loop above, but never stand still */
+            len = u8_len(p);
+        memcpy(chunk, p, len);
+        chunk[len] = 0;
+        C2D_Text text;
+        C2D_TextFontParse(&text, font, buf, chunk);
+        C2D_TextOptimize(&text);
+        {
+            /* a run of only spaces has no glyphs but still has width: advance by it either way,
+               or "帧率 画面" loses the space between two runs */
+            float w = 0, h = 0;
+            C2D_TextGetDimensions(&text, s, s, &w, &h);
+            if (paint && text.words) {
+                /* one depth for everything (UI_DEPTH): text at 0.5 over shapes at 0.3 won the
+                   depth test against a scrim drawn later, and the white Start button showed
+                   through behind its label */
+                C2D_DrawText(&text, C2D_WithColor, cx, cy + dy, UI_DEPTH, s, s, color);
+                if (weight == FONT_BOLD && !font) /* the shared font has a single weight */
+                    C2D_DrawText(&text, C2D_WithColor, cx + 0.55f, cy + dy, UI_DEPTH, s, s, color);
+            }
+            cx += w;
+        }
+        p += len;
+    }
+    if (cx - x > widest)
+        widest = cx - x;
+    return widest;
 }
 
 float ui_text_width(float px, FontWeight weight, const char *str)
 {
-    C2D_Text text;
-    float w = 0, h = 0;
-    px = ui_px(px);
-    const float s = px / FONT_EM;
     C2D_TextBufClear(measure_buf);
-    if (C2D_TextFontParse(&text, ui_font(weight), measure_buf, str))
-        C2D_TextGetDimensions(&text, s, s, &w, &h);
-    return w;
+    return text_runs(0, 0, px, weight, 0, str, false, measure_buf);
 }
 
 float ui_text(float x, float y, float px, FontWeight weight, u32 color, const char *str)
 {
-    C2D_Text text;
-    float w = 0, h = 0;
-    px = ui_px(px);
-    const float s = px / FONT_EM;
-    if (!parse(&text, weight, str))
-        return 0;
-    C2D_TextGetDimensions(&text, s, s, &w, &h);
-    /* one depth for everything (UI_DEPTH): text at 0.5 over shapes at 0.3 won the depth test
-       against a scrim drawn later, and the white Start button showed through behind its label */
-    const float dy = y + TEXT_NUDGE * px / 12;
-    C2D_DrawText(&text, C2D_WithColor, x, dy, UI_DEPTH, s, s, color);
-    if (weight == FONT_BOLD && i18n_language() == LANG_ZH)
-        /* the shared font has one weight: headings get a second pass half a pixel over */
-        C2D_DrawText(&text, C2D_WithColor, x + 0.55f, dy, UI_DEPTH, s, s, color);
-    return w;
+    return text_runs(x, y, px, weight, color, str, true, text_buf);
 }
 
 float ui_text_center(float cx, float y, float px, FontWeight weight, u32 color, const char *str)
@@ -126,34 +206,6 @@ static void draw_cut(float x, float y, float width, float px, FontWeight weight,
         while (n > 0 && ((u8)line[n] & 0xC0) == 0x80); /* whole letters only */
     }
     ui_text(x, y, px, weight, color, buf);
-}
-
-/* One UTF-8 character: its length in bytes (1 on a broken sequence) and its code point. */
-static size_t u8_len(const char *s)
-{
-    const unsigned char c = (unsigned char)*s;
-    if (c < 0x80)
-        return 1;
-    if ((c & 0xE0) == 0xC0)
-        return 2;
-    if ((c & 0xF0) == 0xE0)
-        return 3;
-    if ((c & 0xF8) == 0xF0)
-        return 4;
-    return 1;
-}
-
-static unsigned u8_code(const char *s, size_t n)
-{
-    const unsigned char c = (unsigned char)s[0];
-    if (n == 1)
-        return c;
-    if (n == 2)
-        return ((c & 0x1Fu) << 6) | ((unsigned char)s[1] & 0x3Fu);
-    if (n == 3)
-        return ((c & 0x0Fu) << 12) | (((unsigned char)s[1] & 0x3Fu) << 6) | ((unsigned char)s[2] & 0x3Fu);
-    return ((c & 0x07u) << 18) | (((unsigned char)s[1] & 0x3Fu) << 12) | (((unsigned char)s[2] & 0x3Fu) << 6) |
-           ((unsigned char)s[3] & 0x3Fu);
 }
 
 /* Bytes of a Latin word (a path, "MP4", "Wi-Fi"): they must not be split. */
