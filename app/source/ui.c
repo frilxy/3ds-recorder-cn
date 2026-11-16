@@ -14,6 +14,9 @@
 #define TEXT_BUF_GLYPHS 4096
 
 static C2D_Font fonts[2];
+/* The bundled font, when the build has one (see bundled_font); NULL in the system-font build. */
+static C2D_Font bundled;
+static bool bundled_tried;
 
 /* Chinese characters carry many more strokes than Latin letters, so the smallest sizes get a
  * pixel back or they turn to mush. Widths are measured through the same helper, so wrapping,
@@ -40,6 +43,7 @@ void ui_exit(void)
     C2D_TextBufDelete(measure_buf);
     C2D_FontFree(fonts[FONT_REG]);
     C2D_FontFree(fonts[FONT_BOLD]);
+    C2D_FontFree(bundled);
 }
 
 void ui_frame_begin(void)
@@ -99,11 +103,32 @@ static bool font_has(C2D_Font font, unsigned cp)
  * shown in English and Ukrainian too), everything Inter covers stays in Inter as designed. A
  * character Inter lacks falls back to the shared font as well — that is what the "≈" and the
  * Ukrainian "ї" needed, since the shared font has neither. */
+/* The bundled Chinese font — the iQue console's shared font (cbf_zh-Hans-CN), the same sheet
+ * 3dsDL_CN ships: only the "with font" build has it in romfs, so a build without it costs nothing.
+ * Loaded on the first Chinese text rather than at start-up. */
+static C2D_Font bundled_font(void)
+{
+    if (!bundled_tried) {
+        bundled_tried = true;
+        bundled = C2D_FontLoad("romfs:/hanfont.bcfnt");
+        if (bundled)
+            /* drawn smaller than the sheets' texels: filter it or the strokes break up */
+            C2D_FontSetFilter(bundled, GPU_LINEAR, GPU_LINEAR);
+    }
+    return bundled;
+}
+
+/* The font that draws one character. A hanzi takes the bundled font when the build has one and
+ * otherwise the console's own; Latin, digits and symbols stay in Inter as designed — the shared
+ * font has no "≈" and no Ukrainian "ї", which is what used to come out as a box. What Inter in
+ * turn lacks falls back to the bundled font, then to the shared one. */
 static C2D_Font char_font(FontWeight weight, const char *s, size_t n)
 {
     const unsigned cp = u8_code(s, n);
     if (!cjk_char(cp) && fonts[weight] && font_has(fonts[weight], cp))
         return fonts[weight];
+    if (bundled_font() && font_has(bundled_font(), cp))
+        return bundled_font();
     return NULL;
 }
 
@@ -154,7 +179,7 @@ static float text_runs(float x, float y, float px, FontWeight weight, u32 color,
                    depth test against a scrim drawn later, and the white Start button showed
                    through behind its label */
                 C2D_DrawText(&text, C2D_WithColor, cx, cy + dy, UI_DEPTH, s, s, color);
-                if (weight == FONT_BOLD && !font) /* the shared font has a single weight */
+                if (weight == FONT_BOLD && font != fonts[FONT_BOLD]) /* one weight outside Inter */
                     C2D_DrawText(&text, C2D_WithColor, cx + 0.55f, cy + dy, UI_DEPTH, s, s, color);
             }
             cx += w;

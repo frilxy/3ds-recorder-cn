@@ -3,7 +3,12 @@
 这是 [BolgarMaxym97/3ds-recorder](https://github.com/BolgarMaxym97/3ds-recorder) 的汉化分支：
 把界面译成简体中文，语言切换与上游原有的 English / Українська 并列，仍是同一个开关。
 
-**当前版本使用主机自带字库（system font），包里不带字库文件。**
+提供两个包，界面完全一样，只差中文用哪份字库：
+
+| 包 | 字库 | 适合 |
+|---|---|---|
+| `-cn` | 主机的共享字库 | 中国版主机（或装过 `cbf_zh-Hans-CN` 的机器）；包小 |
+| `-cnwithfont` | 包里带 `hanfont.bcfnt`（iQue 国行共享字库，2.8 MB） | 任何区域的主机，简体字齐全 |
 
 ## 用起来
 
@@ -15,14 +20,15 @@
 
 ## 字库说明
 
-中文由主机自己的共享字库绘制（就是 HOME 菜单用的那份），所以安装包很小，也不需要
-额外把字库写进 RomFS。代价是**能显示哪些汉字由主机的字库决定**：
+`-cn` 版用主机自己的共享字库（HOME 菜单用的那份）绘制中文，包很小，但**能显示哪些汉字由主机的
+字库决定**：中国版主机（以及把共享字库换成 `cbf_zh-Hans-CN` 的机器）汉字齐全；其他区域的主机用的是
+`cbf_std`，日文汉字大多有，部分简体专用字可能缺字。
 
-- 神游/中国版主机（以及把共享字库换成 `cbf_zh-Hans-CN` 的机器）汉字齐全；
-- 其他区域的主机用的是 `cbf_std`，日文汉字大多有，部分简体专用字可能缺字。
-
-字库齐全的自带字库版本（`romfs/hanfont.bcfnt`，取自神游国行共享字库）留作下一步，
-思路与 [frilxy/3dsDL_CN](https://github.com/frilxy/3dsDL_CN) 相同。
+`-cnwithfont` 版把同一份 `cbf_zh-Hans-CN` 放进 RomFS（`app/assets/hanfont.bcfnt`，2.8 MB），
+运行时由 `ui.c` 的 `bundled_font()` 在第一次画汉字时 `C2D_FontLoad` 加载，加载失败自动退回主机字库，
+所以两个版本共用同一份代码，差别只在包里有没有这个文件。做法与
+[frilxy/3dsDL_CN](https://github.com/frilxy/3dsDL_CN) 相同；字体文件版权归任天堂，仅用于自制程序
+在主机字库不全时的显示。
 
 ## 汉化是怎么放进代码的
 
@@ -52,5 +58,16 @@ docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev m
 docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C app
 docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C app cia
 ```
+
+自带字库版就是同一套代码把字库塞进 RomFS 再编一次：
+
+```sh
+cp app/assets/hanfont.bcfnt app/romfs/hanfont.bcfnt
+make -C app APP_CHANNEL=cnwithfont
+make -C app cia APP_CHANNEL=cnwithfont CIA_VERSION=1.2.1
+```
+
+`CIA_VERSION` 只改安装标题版本（AM 看到的那个），面板显示仍是 `APP_VERSION` + `APP_CHANNEL`；
+加一档是为了让自带字库版能覆盖系统字库版。
 
 不想默认中文时，去掉 `app/Makefile` 里的 `CFLAGS += -DCN_BUILD` 即可，其余行为与上游一致。

@@ -42,7 +42,7 @@ jobs:
       - name: Build the dev image (devkitARM, 3gxtool, makerom)
         run: docker build -f tools/Dockerfile.ci -t 3dsrec-dev tools/
 
-      - name: sysmodule, plugin, app
+      - name: sysmodule, plugin, app (system font)
         run: |
           set -eux
           dkp() {
@@ -53,17 +53,30 @@ jobs:
           dkp make -C plugin
           dkp make -C app
           dkp make -C app cia
-
-      - name: Name the packages after the version
-        run: |
-          set -eu
           version=$(sed -n 's/^APP_VERSION :=\s*//p' app/Makefile)
-          channel=$(sed -n 's/^APP_CHANNEL\s*:=\s*//p' app/Makefile)
-          suffix=${channel:+-$channel}
           mkdir -p out
-          cp app/3ds-recorder.3dsx "out/3ds-recorder-$version$suffix.3dsx"
-          cp app/3ds-recorder.cia "out/3ds-recorder-$version$suffix.cia"
-          cp app/3ds-recorder.smdh "out/3ds-recorder-$version$suffix.smdh"
+          cp app/3ds-recorder.3dsx "out/3ds-recorder-$version-cn.3dsx"
+          cp app/3ds-recorder.cia  "out/3ds-recorder-$version-cn.cia"
+          cp app/3ds-recorder.smdh "out/3ds-recorder-$version-cn.smdh"
+          ls -l out
+
+      # The same app with the iQue console's shared font in romfs (app/assets/hanfont.bcfnt): it
+      # draws every hanzi the console's own font may lack. The installed title version goes one
+      # step higher, so installing it over the system-font build is an upgrade (as 3dsDL_CN does).
+      - name: app with the bundled font
+        run: |
+          set -eux
+          dkp() {
+            docker run --rm -v "$PWD:/work" -w /work -e HOME=/tmp \
+              --user "$(id -u):$(id -g)" 3dsrec-dev "$@"
+          }
+          version=$(sed -n 's/^APP_VERSION :=\s*//p' app/Makefile)
+          font_version=$(python3 -c "m='$version'.split('.'); print('%s.%s.%d' % (m[0], m[1], int(m[2]) + 1))")
+          cp app/assets/hanfont.bcfnt app/romfs/hanfont.bcfnt
+          dkp make -C app APP_CHANNEL=cnwithfont
+          dkp make -C app cia APP_CHANNEL=cnwithfont CIA_VERSION="$font_version"
+          cp app/3ds-recorder.3dsx "out/3ds-recorder-$version-cnwithfont.3dsx"
+          cp app/3ds-recorder.cia  "out/3ds-recorder-$version-cnwithfont.cia"
           ls -l out
 
       - uses: actions/upload-artifact@v4
@@ -113,10 +126,12 @@ jobs:
           set -eu
           tag=${GITHUB_REF#refs/tags/}
           repo=${GITHUB_REPOSITORY}
+          base="https://github.com/$repo/releases/download/$tag"
           {
-            echo '| 3DSX（Homebrew Launcher） | CIA（FBI 扫码安装） |'
-            echo '|---|---|'
-            echo "| ![3DSX QR](https://github.com/$repo/releases/download/$tag/$(basename out/*.3dsx).qr.png) | ![CIA QR](https://github.com/$repo/releases/download/$tag/$(basename out/*.cia).qr.png) |"
+            echo '| | 系统字库版 `-cn` | 自带字库版 `-cnwithfont` |'
+            echo '|---|---|---|'
+            echo "| CIA（FBI 扫码安装） | ![CIA cn]($base/$(basename out/*-cn.cia).qr.png) | ![CIA cnwithfont]($base/$(basename out/*-cnwithfont.cia).qr.png) |"
+            echo "| 3DSX（Homebrew Launcher） | ![3DSX cn]($base/$(basename out/*-cn.3dsx).qr.png) | ![3DSX cnwithfont]($base/$(basename out/*-cnwithfont.3dsx).qr.png) |"
             echo
             cat .github/release-notes.md
           } > notes.md
