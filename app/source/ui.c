@@ -19,13 +19,23 @@ static C2D_TextBuf text_buf;
  * eating the frame's buffer one trial line at a time. */
 static C2D_TextBuf measure_buf;
 
+/* Chinese is drawn with the console's own font instead of Inter: the romfs sheets only carry
+ * Latin, Greek and Cyrillic, and the shared font is the one place Chinese glyphs always come from
+ * (it is the font the HOME Menu itself uses). citro2d takes a NULL font as "the system font", and
+ * it is already mapped by the time anything is drawn: C2D_TextBufNew maps it. */
+static C2D_Font ui_font(FontWeight weight)
+{
+    return i18n_language() == LANG_ZH ? NULL : fonts[weight];
+}
+
 bool ui_init(void)
 {
     fonts[FONT_REG] = C2D_FontLoad("romfs:/font/inter_500.bcfnt");
     fonts[FONT_BOLD] = C2D_FontLoad("romfs:/font/inter_700.bcfnt");
     text_buf = C2D_TextBufNew(TEXT_BUF_GLYPHS);
     measure_buf = C2D_TextBufNew(512);
-    return fonts[FONT_REG] && fonts[FONT_BOLD] && text_buf && measure_buf;
+    /* a font sheet that failed to load falls back to the system font, as Chinese does */
+    return text_buf && measure_buf;
 }
 
 void ui_exit(void)
@@ -45,7 +55,7 @@ void ui_frame_begin(void)
 
 static bool parse(C2D_Text *text, FontWeight weight, const char *str)
 {
-    if (!C2D_TextFontParse(text, fonts[weight], text_buf, str))
+    if (!C2D_TextFontParse(text, ui_font(weight), text_buf, str))
         return false;
     C2D_TextOptimize(text);
     return true;
@@ -56,7 +66,7 @@ float ui_text_width(float px, FontWeight weight, const char *str)
     C2D_Text text;
     float w = 0, h = 0, s = px / FONT_EM;
     C2D_TextBufClear(measure_buf);
-    if (C2D_TextFontParse(&text, fonts[weight], measure_buf, str))
+    if (C2D_TextFontParse(&text, ui_font(weight), measure_buf, str))
         C2D_TextGetDimensions(&text, s, s, &w, &h);
     return w;
 }
@@ -70,7 +80,11 @@ float ui_text(float x, float y, float px, FontWeight weight, u32 color, const ch
     C2D_TextGetDimensions(&text, s, s, &w, &h);
     /* one depth for everything (UI_DEPTH): text at 0.5 over shapes at 0.3 won the depth test
        against a scrim drawn later, and the white Start button showed through behind its label */
-    C2D_DrawText(&text, C2D_WithColor, x, y + TEXT_NUDGE * px / 12, UI_DEPTH, s, s, color);
+    const float dy = y + TEXT_NUDGE * px / 12;
+    C2D_DrawText(&text, C2D_WithColor, x, dy, UI_DEPTH, s, s, color);
+    if (weight == FONT_BOLD && i18n_language() == LANG_ZH)
+        /* the shared font has one weight: headings get a second pass half a pixel over */
+        C2D_DrawText(&text, C2D_WithColor, x + 0.55f, dy, UI_DEPTH, s, s, color);
     return w;
 }
 
@@ -105,8 +119,63 @@ static void draw_cut(float x, float y, float width, float px, FontWeight weight,
     ui_text(x, y, px, weight, color, buf);
 }
 
-/* Greedy word wrap on spaces and '\n', measured with the font itself; draws only if `draw`. At
- * most `max_lines` lines (0: any), the last cut with "…" when there is more. */
+/* One UTF-8 character: its length in bytes (1 on a broken sequence) and its code point. */
+static size_t u8_len(const char *s)
+{
+    const unsigned char c = (unsigned char)*s;
+    if (c < 0x80)
+        return 1;
+    if ((c & 0xE0) == 0xC0)
+        return 2;
+    if ((c & 0xF0) == 0xE0)
+        return 3;
+    if ((c & 0xF8) == 0xF0)
+        return 4;
+    return 1;
+}
+
+static unsigned u8_code(const char *s, size_t n)
+{
+    const unsigned char c = (unsigned char)s[0];
+    if (n == 1)
+        return c;
+    if (n == 2)
+        return ((c & 0x1Fu) << 6) | ((unsigned char)s[1] & 0x3Fu);
+    if (n == 3)
+        return ((c & 0x0Fu) << 12) | (((unsigned char)s[1] & 0x3Fu) << 6) | ((unsigned char)s[2] & 0x3Fu);
+    return ((c & 0x07u) << 18) | (((unsigned char)s[1] & 0x3Fu) << 12) | (((unsigned char)s[2] & 0x3Fu) << 6) |
+           ((unsigned char)s[3] & 0x3Fu);
+}
+
+/* Bytes of a Latin word (a path, "MP4", "Wi-Fi"): they must not be split. */
+static bool u8_word(unsigned char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_' ||
+           c == '/' || c == '.' || c == '+' || c == '%' || c == '=' || c == ':' || c == '\'';
+}
+
+/* A line may not start with closing punctuation nor end with an opening one (Chinese typography:
+ * the console's own UI wraps the same way). Latin words always may start a line. */
+static bool line_may_start(const char *unit, size_t n)
+{
+    const unsigned cp = u8_code(unit, n);
+    static const unsigned closing[] = {0x3002, 0xFF0C, 0x3001, 0xFF1B, 0xFF1A, 0xFF1F, 0xFF01, 0x300D, 0x300F,
+                                       0x3011, 0xFF09, 0x300B, 0x3015, 0x201D, 0x2019, 0x00B7, 0x2026, 0xFF05};
+    static const char ascii[] = ",.;:!?%)]}";
+    if (n == 1) {
+        if (strchr(ascii, (int)(unsigned char)unit[0]))
+            return false;
+        return true;
+    }
+    for (unsigned i = 0; i < sizeof(closing) / sizeof(closing[0]); i++)
+        if (cp == closing[i])
+            return false;
+    return true;
+}
+
+/* Greedy wrap measured with the font itself: Chinese has no spaces, so a line may break between
+ * any two characters (see line_may_start), Latin words stay whole. Draws only if `draw`. At most
+ * `max_lines` lines (0: any), the last cut with "…" when there is more. */
 static float wrap(float x, float y, float width, float px, FontWeight weight, u32 color, const char *str, bool draw,
                   int max_lines)
 {
@@ -129,33 +198,44 @@ static float wrap(float x, float y, float width, float px, FontWeight weight, u3
         lines++;                                                                                           \
     } while (0)
     while (*p) {
-        const char *end = p;
-        while (*end && *end != ' ' && *end != '\n')
-            end++;
-        size_t word = (size_t)(end - p);
-        if (line_len + word + 2 >= sizeof(trial))
-            word = sizeof(trial) - line_len - 2;
-        memcpy(trial, line, line_len);
-        size_t t = line_len;
-        if (line_len)
-            trial[t++] = ' ';
-        memcpy(trial + t, p, word);
-        trial[t + word] = 0;
-        if (line_len && ui_text_width(px, weight, trial) > width) {
-            EMIT(true);
-            memcpy(line, p, word);
-            line_len = word;
-        } else {
-            memcpy(line, trial, t + word + 1);
-            line_len = t + word;
+        if (*p == '\n') {
+            EMIT(p[1] != 0);
+            line_len = 0;
+            line[0] = 0;
+            p++;
+            continue;
         }
-        line[line_len] = 0;
-        if (*end == '\n') {
-            EMIT(end[1] != 0);
+        /* one unit: a space, a whole Latin word, or one character of any other script */
+        const char *unit = p;
+        size_t unit_len;
+        if ((unsigned char)*p < 0x80 && u8_word((unsigned char)*p)) {
+            while (*p && (unsigned char)*p < 0x80 && u8_word((unsigned char)*p))
+                p++;
+            unit_len = (size_t)(p - unit);
+        } else {
+            unit_len = u8_len(p);
+            p += unit_len;
+        }
+        if (unit_len >= sizeof(line) - line_len - 1) { /* a line of its own; keep the text intact */
+            EMIT(line_len != 0);
+            line_len = 0;
+            line[0] = 0;
+            if (unit_len > sizeof(line) - 1) /* one "word" longer than a line: cut it, never overrun */
+                unit_len = sizeof(line) - 1;
+        }
+        memcpy(trial, line, line_len);
+        memcpy(trial + line_len, unit, unit_len);
+        trial[line_len + unit_len] = 0;
+        if (line_len && ui_text_width(px, weight, trial) > width && line_may_start(unit, unit_len)) {
+            while (line_len > 0 && line[line_len - 1] == ' ')
+                line_len--;
+            EMIT(true);
             line_len = 0;
             line[0] = 0;
         }
-        p = *end ? end + 1 : end;
+        memcpy(line + line_len, unit, unit_len);
+        line_len += unit_len;
+        line[line_len] = 0;
     }
     if (line_len)
         EMIT(false);
@@ -466,15 +546,35 @@ float ui_key_chip(float x, float y, const char *key)
     return w;
 }
 
-/* The flags on the language switch, 21 x 13 (US: stripes + canton; UA: blue over yellow). */
-void ui_flag(float x, float y, bool ukraine) { ui_flag_sized(x, y, 21, ukraine); }
+/* The emblems on the language switch, 21 x 13: US stripes + canton, Ukraine blue over yellow, and
+ * for Chinese the red field with a star (at this size the flag's four small stars would be dots). */
+void ui_flag(float x, float y, Lang lang) { ui_flag_sized(x, y, 21, lang); }
 
-void ui_flag_sized(float x, float y, float w, bool ukraine)
+/* A five-pointed star of radius r, as a fan of triangles (no sprite needed). */
+static void star(float cx, float cy, float r, u32 color)
+{
+    float px = cx, py = cy - r;
+    for (int i = 1; i <= 10; i++) {
+        const float a = -M_PI / 2 + (float)i * M_PI / 5;
+        const float rad = i % 2 ? r * 0.42f : r;
+        const float vx = cx + cosf(a) * rad, vy = cy + sinf(a) * rad;
+        C2D_DrawTriangle(cx, cy, color, px, py, color, vx, vy, color, UI_DEPTH);
+        px = vx;
+        py = vy;
+    }
+}
+
+void ui_flag_sized(float x, float y, float w, Lang lang)
 {
     const float h = w * 13 / 21, k = w / 21;
-    if (ukraine) {
+    if (lang == LANG_UK) {
         ui_rect(x, y, w, h / 2, COL_FLAG_BLUE);
         ui_rect(x, y + h / 2, w, h / 2, COL_FLAG_YELLOW);
+        return;
+    }
+    if (lang == LANG_ZH) {
+        ui_rect(x, y, w, h, COL_CN_RED);
+        star(x + w * 0.28f, y + h * 0.36f, h * 0.26f, COL_CN_YELLOW);
         return;
     }
     for (int i = 0; i < 7; i++)

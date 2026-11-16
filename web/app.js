@@ -58,6 +58,28 @@
       big: 'Довге відео (%1): браузер телефона сам його завантажить — дивіться в його завантаженнях. Тримайте консоль на екрані «Завантажити» з відкритою кришкою.',
       diag: 'Журнал для розробника (.txt)',
     },
+    zh: {
+      length: '时长', size: '大小', eta: '传输', s1: '从主机下载', s2: '生成视频',
+      s3: '保存', waiting: '等待中', fast: '快速：使用手机的视频编码器',
+      live: '实时：请保持本页打开并让屏幕常亮', none: '此浏览器无法生成视频',
+      start: '开始', startHint: '点「开始」：浏览器只允许在点击之后让页面录音。',
+      keep: '请在视频准备好之前保持本页打开并让屏幕常亮。页面切到后台时，转换会暂停。',
+      long: '这是较长的录像：经 3DS Wi-Fi 大约需要 %1。长录像用 SD 卡更快。',
+      save: '保存视频', share: '分享 / 存到「照片」', raw: '或下载原始 .r3d，供电脑使用',
+      sd: '也可以通过 SD 卡取出录像：关机后把卡插到电脑上，文件在 /3ds/recorder/recordings。',
+      howIos: '点「保存视频」，然后打开「文件」→「下载」→ 视频 →「分享」→「存储视频」：它会存到「照片」。',
+      howAndroid: '点「保存视频」：它会保存到「下载」并出现在相册里。',
+      howOther: '点「保存视频」：它会保存到下载文件夹。',
+      ready: '就绪', retry: '重试', lost: '与主机的连接中断了。主机是否还停在「下载」界面，盖子是否打开？',
+      notFound: '这个录像已不再提供。请在主机上重新选择（录像库 → Y）。',
+      noFile: '链接里没有录像。请重新扫描主机上的二维码。',
+      failed: '无法生成视频（%1）。原始 .r3d 在下方。', paused: '已暂停：等待下载',
+      hidden: '已暂停：页面在后台', min: '分', sec: '秒', left: '还剩 %1', mbs: 'MB/s',
+      c1: '主机正在转换', c1x: '正在转换成小的 MP4：3DS Wi-Fi 很快就能传完', c1q: '等待中',
+      c2: '下载到手机', direct: '直接下载', directLink: '或直接下载',
+      big: '较长的视频（%1）：手机会自行下载，请到浏览器的下载列表里查看。请让主机停在「下载」界面并保持盖子打开。',
+      diag: '开发者日志（.txt）',
+    },
   };
   let L = TEXT.en;
   const t = (k, ...a) => a.reduce((s, v, i) => s.replace('%' + (i + 1), v), L[k] || TEXT.en[k] || k);
@@ -674,6 +696,7 @@
     if (!name) { fail(t('noFile')); return; }
     report(`rec ${info.name} ${info.size} B ${info.ms} ms ok ${info.ok} closed ${info.closed} | prep ${info.prep} ${info.prepPct} mp4 ${info.mp4}`);
     if (info.lang === 'uk') { L = TEXT.uk; document.documentElement.lang = 'uk'; }
+    if (info.lang === 'zh') { L = TEXT.zh; document.documentElement.lang = 'zh-CN'; }
     document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
     if (info.name !== name || !info.ok) { fail(t('notFound')); return; }
     $('console').textContent = info.console || '';

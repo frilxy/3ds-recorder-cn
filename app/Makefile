@@ -14,8 +14,9 @@ TARGET          := 3ds-recorder
 # The CIA's title version: raise it with each build that goes to a console, or the HOME Menu
 # keeps showing the banner it cached for the installed version.
 APP_VERSION := 1.2.0
-# "beta" for the open beta, empty for a release: shown next to the version on the panel
-APP_CHANNEL     :=
+# "beta" for the open beta, empty for a release: shown next to the version on the panel.
+# The Chinese build says "cn" so what is installed is never mistaken for the upstream release.
+APP_CHANNEL     := cn
 APP_TITLE       := 3DS Recorder
 APP_DESCRIPTION := Records the whole console
 APP_AUTHOR      := 3ds-screen-recorder
@@ -29,6 +30,8 @@ INCLUDES        := source ../codec/include ../prep/include ../tools/r3dconv ../t
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS   := -g -Wall -Wextra -O2 -mword-relocations -ffunction-sections $(ARCH) -std=gnu11
 CFLAGS   += $(INCLUDE) -D__3DS__ -DAPP_VERSION=\"$(APP_VERSION)\" -DAPP_CHANNEL=\"$(APP_CHANNEL)\"
+# The Chinese build starts in Chinese (i18n.c: CN_BUILD); drop this line and it starts in English.
+CFLAGS   += -DCN_BUILD
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS     := -lcitro2d -lcitro3d -lctru -lm

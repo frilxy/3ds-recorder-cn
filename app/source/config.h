@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "i18n.h"
+
 #define CONFIG_PATH "sdmc:/3ds/recorder/config.ini"
 
 enum { SCREENS_BOTH, SCREENS_TOP, SCREENS_BOTTOM };
@@ -20,7 +22,7 @@ typedef struct {
     bool audio;
     int led;          /* 0 off, 1 solid, 2 pulse */
     char hotkey[48];  /* as written, e.g. R+SELECT */
-    bool ukrainian;   /* lang=uk; English otherwise (the default) */
+    Lang lang;        /* lang=en|uk|zh; the build's default until one is chosen */
     bool langSet;     /* config.ini has lang=: the language was chosen (first run asks) */
     bool guideSeen;   /* guide=done: the first-run guide was shown */
     bool replay;      /* replay=on: the module keeps the last 30 seconds all the time (the replay buffer) */

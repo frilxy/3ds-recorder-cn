@@ -1,7 +1,9 @@
 /*
- * The app's texts in English (the default) and Ukrainian. One X-macro list, so a key without
- * both texts does not compile. Switched by the flag on the control panel or in Settings and
- * kept in config.ini as lang=en|uk.
+ * The app's texts in English (the default), Ukrainian and Simplified Chinese. One X-macro list
+ * holds the English and Ukrainian columns, so a key without both does not compile; Chinese lives
+ * in i18n_zh.c (I18N_ZH, one entry per key) because it is a separate script and is meant to be
+ * kept in one file. Switched by the flag on the control panel or in Settings and kept in
+ * config.ini as lang=en|uk|zh.
  */
 #ifndef I18N_H
 #define I18N_H
@@ -268,10 +270,21 @@ typedef enum {
     S_COUNT
 } Str;
 
-void i18n_set_ukrainian(bool on);
-bool i18n_ukrainian(void);
+/* The languages the app is translated into, in the order the flag on the panel cycles them. */
+typedef enum { LANG_EN = 0, LANG_UK, LANG_ZH, LANG_COUNT } Lang;
+
+void i18n_set_language(Lang lang);
+Lang i18n_language(void);
+/* The next language the flag switches to: English → Ukrainian → Chinese → English. */
+Lang i18n_next(Lang lang);
+/* "en" / "uk" / "zh" for config.ini and the phone page, and back (unknown: English). */
+const char *i18n_tag(Lang lang);
+Lang i18n_from_tag(const char *tag);
+/* The language before anyone chose one: Chinese in the Chinese build (-DCN_BUILD), else English. */
+Lang i18n_default(void);
+
 const char *T(Str id);
-/* "12 recordings" / "12 записів" with the Ukrainian plural forms. */
+/* "12 recordings" / "12 записів" / "12 个录像", with the plurals each language needs. */
 const char *i18n_recordings(unsigned n, char *buf, unsigned cap);
 
 #endif

@@ -34,6 +34,10 @@ static void focus_ring(Rect r, float radius) { ui_frame(r.x - 1, r.y - 1, r.w + 
 static const Rect TILE[4] = {{12, 12, 144, 94}, {164, 12, 144, 94}, {12, 114, 144, 94}, {164, 114, 144, 94}};
 /* hint row, right side: the language flag (help is a tile now) */
 static Rect flag_btn(void) { return (Rect){281, 213, 27, 19}; }
+/* The languages, in the order the flag cycles them. Each names itself in its own script; the
+ * first-run screen shows every prompt, so it is readable before the choice is made. */
+static const char *const LANG_NAME[LANG_COUNT] = {"English", "Українська", "中文"};
+static const char *const LANG_PROMPT[LANG_COUNT] = {"Choose your language", "Оберіть мову", "选择语言"};
 /* The first tile holds two switches, one under the other: the recorder, and its replay buffer */
 static const Rect TILE_REC = {12, 12, 144, 46}, TILE_REPLAY = {12, 60, 144, 46};
 #define REPLAY_NEED_MB 700u   /* the replay's two files (2 x 256.5 MB) and the recorder's reserve */
@@ -296,7 +300,7 @@ void app_init(App *a, const char *selfPath)
     APT_CheckNew3DS(&n3ds);
     a->new3ds = n3ds;
     config_load(&a->cfg);
-    i18n_set_ukrainian(a->cfg.ukrainian);
+    i18n_set_language(a->cfg.lang);
     a->lumaVersion = recorder_luma_version();
     SdInfo first; /* the first screen needs it: read once here, then by the info thread */
     info_read(&first, true);
@@ -324,7 +328,7 @@ void app_init(App *a, const char *selfPath)
         tell_system_stop(a);
     app_log("app: %s, lang %s, guide %s, module %s (state %lu, file %s), Luma modules %s, SD free %lu MB, "
             "%lu recordings (%llu MB)%s",
-            n3ds ? "New 3DS" : "Old 3DS", a->cfg.ukrainian ? "uk" : "en", a->cfg.guideSeen ? "seen" : "first run",
+            n3ds ? "New 3DS" : "Old 3DS", i18n_tag(a->cfg.lang), a->cfg.guideSeen ? "seen" : "first run",
             a->st.running ? "running" : "not running", (unsigned long)a->st.state,
             a->moduleFile == MODULE_SAME ? "same" : a->moduleFile == MODULE_DIFFERENT ? "different" : "missing",
             a->lumaModules ? "on" : "OFF", (unsigned long)a->sdFreeMb, (unsigned long)a->files.count,
@@ -345,7 +349,7 @@ void app_init(App *a, const char *selfPath)
     if (!a->cfg.guideSeen) { /* the very first run: the language, how to use it, then on */
         a->afterGuide = next;
         a->guidePage = 0;
-        go(a, a->cfg.langSet ? SCR_GUIDE : SCR_LANG, a->cfg.ukrainian ? 1 : 0);
+        go(a, a->cfg.langSet ? SCR_GUIDE : SCR_LANG, (int)a->cfg.lang);
     } else
         go(a, next, 0);
 }
@@ -446,14 +450,17 @@ static bool run_pending(App *a)
     return false;
 }
 
-static void set_language(App *a, bool uk)
+static void set_language(App *a, Lang lang)
 {
-    if (a->cfg.ukrainian == uk)
+    if (a->cfg.lang == lang)
         return;
-    a->cfg.ukrainian = uk;
-    i18n_set_ukrainian(uk);
-    config_set("lang", uk ? "uk" : "en");
+    a->cfg.lang = lang;
+    i18n_set_language(lang);
+    config_set("lang", i18n_tag(lang));
 }
+
+/* The flag on the panel and X: English → Ukrainian → Chinese → English. */
+static void cycle_language(App *a) { set_language(a, i18n_next(a->cfg.lang)); }
 
 /* ------------------------------------------------------------------ hotkey */
 
@@ -614,7 +621,7 @@ static bool row_seg(const App *a, int row, Seg *g)
         *g = (Seg){{T(S_LED_PULSE), T(S_LED_SOLID), T(S_LED_OFF)}, 3, a->cfg.led == 2 ? 0 : a->cfg.led == 1 ? 1 : 2, -1};
         return true;
     case ROW_LANG:
-        *g = (Seg){{"English", "Українська", NULL}, 2, a->cfg.ukrainian ? 1 : 0, -1};
+        *g = (Seg){{LANG_NAME[0], LANG_NAME[1], LANG_NAME[2]}, LANG_COUNT, (int)a->cfg.lang, -1};
         return true;
     }
     return false;
@@ -648,7 +655,7 @@ static void choose(App *a, int row, int opt)
         break;
     }
     case ROW_LANG:
-        set_language(a, opt == 1);
+        set_language(a, (Lang)opt);
         break;
     }
 }
@@ -770,14 +777,14 @@ static void update_panel(App *a, const Input *in)
     a->focus = f;
     if (d & KEY_A) {
         if (f == FOCUS_FLAG)
-            set_language(a, !a->cfg.ukrainian);
+            cycle_language(a);
         else if (f == FOCUS_REPLAY)
             toggle_replay(a);
         else
             panel_activate(a, f);
     }
     if (d & KEY_X)
-        set_language(a, !a->cfg.ukrainian);
+        cycle_language(a);
     if ((d & KEY_Y) && a->files.newest[0]) { /* the last recording: straight into the player */
         open_gallery(a, a->files.newest);
         a->galAutoPlay = true;
@@ -793,7 +800,7 @@ static void update_panel(App *a, const Input *in)
         }
     if (hit(flag_btn(), in)) {
         a->focus = FOCUS_FLAG;
-        set_language(a, !a->cfg.ukrainian);
+        cycle_language(a);
     }
     if (split && hit(TILE_REPLAY, in)) {
         a->focus = FOCUS_REPLAY;
@@ -823,7 +830,7 @@ static void update_firstrun(App *a, const Input *in)
     if (d & KEY_START)
         a->quit = true;
     if (d & KEY_X)
-        set_language(a, !a->cfg.ukrainian);
+        cycle_language(a);
     if (act == 0)
         go(a, SCR_PANEL, 0);
     else if (act == 1) {
@@ -850,28 +857,30 @@ static void update_help(App *a, const Input *in)
 
 /* ------------------------------------------------------------------ language (first run) */
 
-static const Rect LANG_CARD[2] = {{12, 40, 144, 132}, {164, 40, 144, 132}};
+static const Rect LANG_CARD[LANG_COUNT] = {{12, 40, 92, 132}, {114, 40, 92, 132}, {216, 40, 92, 132}};
 static const Rect LANG_GO = {12, 196, 296, 32};
 
 static void update_lang(App *a, const Input *in)
 {
     const u32 d = in->down;
     int f = a->focus;
-    if (d & KEY_DLEFT)
-        f = 0;
-    if (d & KEY_DRIGHT)
-        f = 1;
-    for (int i = 0; i < 2; i++)
+    if (d & KEY_DLEFT && f > 0)
+        f--;
+    if (d & KEY_DRIGHT && f < LANG_COUNT - 1)
+        f++;
+    for (int i = 0; i < LANG_COUNT; i++)
         if (hit(LANG_CARD[i], in))
             f = i;
+    if (f > LANG_COUNT - 1)
+        f = LANG_COUNT - 1;
     if (f != a->focus) { /* the screens switch at once, so the choice shows itself */
         a->focus = f;
-        a->cfg.ukrainian = f == 1;
-        i18n_set_ukrainian(f == 1);
+        a->cfg.lang = (Lang)f;
+        i18n_set_language(a->cfg.lang);
     }
     if ((d & KEY_A) || hit(LANG_GO, in)) {
         a->cfg.langSet = true;
-        config_set("lang", a->cfg.ukrainian ? "uk" : "en");
+        config_set("lang", i18n_tag(a->cfg.lang));
         go(a, SCR_GUIDE, 0);
     }
 }
@@ -913,7 +922,7 @@ static void update_guide(App *a, const Input *in)
     if ((d & KEY_B) || hit(GD_SKIP, in))
         guide_done(a);
     if (d & KEY_X)
-        set_language(a, !a->cfg.ukrainian);
+        cycle_language(a);
 }
 
 static void update_settings(App *a, const Input *in)
@@ -1319,7 +1328,7 @@ static int g_prepSeen;
 
 static void phone_start(App *a)
 {
-    const ServerState st = server_start(a->phoneName, a->cfg.ukrainian ? "uk" : "en", APP_VERSION, a->new3ds);
+    const ServerState st = server_start(a->phoneName, i18n_tag(a->cfg.lang), APP_VERSION, a->new3ds);
     g_qrOk = false;
     ServerStats ss;
     server_stats(&ss);
@@ -1449,7 +1458,9 @@ static void format_name(char *buf, size_t cap, const char *name)
         snprintf(buf, cap, "%s", name);
         return;
     }
-    if (i18n_ukrainian())
+    if (i18n_language() == LANG_ZH)
+        snprintf(buf, cap, "%04d年%d月%d日 · %02d:%02d", y, mo, d, h, mi);
+    else if (i18n_language() == LANG_UK)
         snprintf(buf, cap, "%02d.%02d.%04d · %02d:%02d", d, mo, y, h, mi);
     else
         snprintf(buf, cap, "%s %d, %04d · %02d:%02d", MON[mo - 1], d, y, h, mi);
@@ -1670,18 +1681,21 @@ static void draw_lang_top(App *a)
     ui_circle(200, 62, 22, COL_SURFACE);
     ui_circle(200, 62, 7, COL_ACCENT);
     ui_text_center(200, 98, 9, FONT_REG, COL_MUTED, "3DS Recorder");
-    ui_text_center(200, 128, 19, FONT_BOLD, COL_TEXT, "Choose your language");
-    ui_text_center(200, 158, 13, FONT_REG, COL_SOFT, "Оберіть мову");
+    /* one line per translation of "choose your language": the screen has to be readable before
+       the choice is made, and the three cards below name themselves */
+    char prompt[128] = "";
+    for (int i = 0; i < LANG_COUNT; i++)
+        snprintf(prompt + strlen(prompt), sizeof(prompt) - strlen(prompt), "%s%s", i ? " · " : "", LANG_PROMPT[i]);
+    ui_text_center(200, 124, 15, FONT_BOLD, COL_TEXT, prompt);
 }
 
 static void draw_lang_bottom(App *a)
 {
-    static const char *const name[2] = {"English", "Українська"};
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < LANG_COUNT; i++) {
         const Rect r = LANG_CARD[i];
         ui_card(r.x, r.y, r.w, r.h, 12, a->focus == i ? COL_SURFACE2 : COL_SURFACE);
-        ui_flag_sized(r.x + (r.w - 72) / 2, r.y + 24, 72, i == 1);
-        ui_text_center(r.x + r.w / 2, r.y + 88, 12, FONT_BOLD, COL_TEXT, name[i]);
+        ui_flag_sized(r.x + (r.w - 56) / 2, r.y + 30, 56, (Lang)i);
+        ui_text_center(r.x + r.w / 2, r.y + 88, 12, FONT_BOLD, COL_TEXT, LANG_NAME[i]);
         if (a->focus == i)
             focus_ring(r, 12);
     }
@@ -1847,7 +1861,9 @@ static void format_short(char *buf, size_t cap, const char *name)
     int y = 0, mo = 0, d = 0, h = 0, mi = 0;
     if (sscanf(name, "%4d%2d%2d_%2d%2d", &y, &mo, &d, &h, &mi) != 5 || mo < 1 || mo > 12)
         snprintf(buf, cap, "%s", name);
-    else if (i18n_ukrainian())
+    else if (i18n_language() == LANG_ZH)
+        snprintf(buf, cap, "%d月%d日 · %02d:%02d", mo, d, h, mi);
+    else if (i18n_language() == LANG_UK)
         snprintf(buf, cap, "%02d.%02d · %02d:%02d", d, mo, h, mi);
     else
         snprintf(buf, cap, "%s %d · %02d:%02d", MON[mo - 1], d, h, mi);
@@ -2116,7 +2132,7 @@ static void draw_panel_bottom(App *a)
     hk_chips(x, 216, hk_mask(a->cfg.hotkey), COL_MUTED);
     const Rect fb = flag_btn();
     ui_rrect(fb.x, fb.y, fb.w, fb.h, 4, COL_SURFACE2);
-    ui_flag(fb.x + 3, fb.y + 3, !a->cfg.ukrainian); /* shows the other language */
+    ui_flag(fb.x + 3, fb.y + 3, i18n_next(a->cfg.lang)); /* shows the language the next tap switches to */
     if (a->focus == FOCUS_FLAG)
         focus_ring(fb, 4);
 }
