@@ -94,13 +94,13 @@ static bool font_has(C2D_Font font, unsigned cp)
     return index >= 0 && (unsigned)index != C2D_FontGetInfo(font)->alterCharIndex;
 }
 
-/* The font that draws one character. Chinese takes the console's own font; Latin, digits and
- * symbols stay in Inter as designed — the shared font has no "≈" and no Ukrainian "ї", which is
- * what used to come out as a box. A character Inter in turn lacks falls back to the shared font. */
+/* The font that draws one character, whatever the interface language is: a hanzi always comes
+ * from the console's own font (Inter has no Chinese at all, and "中文" on the language switch is
+ * shown in English and Ukrainian too), everything Inter covers stays in Inter as designed. A
+ * character Inter lacks falls back to the shared font as well — that is what the "≈" and the
+ * Ukrainian "ї" needed, since the shared font has neither. */
 static C2D_Font char_font(FontWeight weight, const char *s, size_t n)
 {
-    if (i18n_language() != LANG_ZH)
-        return fonts[weight];
     const unsigned cp = u8_code(s, n);
     if (!cjk_char(cp) && fonts[weight] && font_has(fonts[weight], cp))
         return fonts[weight];
