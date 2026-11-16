@@ -34,8 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # tools/Dockerfile.ci: the same pinned devkitARM, 3gxtool and makerom as tools/dkp.sh, minus
+      # libctrpf (tests/benchplugin only) — its pacman repository answers 403 now and then.
       - name: Build the dev image (devkitARM, 3gxtool, makerom)
-        run: docker build -t 3dsrec-dev tools/
+        run: docker build -f tools/Dockerfile.ci -t 3dsrec-dev tools/
 
       - name: sysmodule, plugin, app
         run: |
