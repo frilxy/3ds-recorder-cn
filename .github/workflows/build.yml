@@ -24,6 +24,9 @@ jobs:
       - name: Every key has a Chinese text
         run: python3 tools/check-i18n.py
 
+      - name: docs/zh-strings.md matches the texts
+        run: python3 tools/zh-strings.py --check
+
   # tests/host is left out: with -std=c11 the bench clock (CLOCK_MONOTONIC) does not compile on
   # this glibc, which is a plain upstream Makefile issue and has nothing to do with the texts.
 
