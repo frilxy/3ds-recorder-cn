@@ -84,12 +84,13 @@ jobs:
           name: 3ds-recorder-cn-${{ github.sha }}
           path: out
 
-      # A QR code next to each package: scanned with FBI on the console, it installs the CIA
-      # straight from the release asset.
+      # A QR code next to each package: scanned with FBI on the console, it installs straight from
+      # the release asset. The image points at the asset's own download URL, so it is generated here.
       - name: QR codes for the packages
         run: |
           set -eu
-          python3 -m pip install --quiet qrcode pillow
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-qrcode python3-pil
           tag=${GITHUB_REF#refs/tags/}
           repo=${GITHUB_REPOSITORY}
           for f in out/*.cia out/*.3dsx; do
@@ -97,8 +98,7 @@ jobs:
             url="https://github.com/$repo/releases/download/$tag/$name"
             python3 - "$url" "out/$name.qr.png" <<'PY'
           import sys, qrcode
-          img = qrcode.make(sys.argv[1], box_size=6, border=2)
-          img.save(sys.argv[2])
+          qrcode.make(sys.argv[1], box_size=6, border=2).save(sys.argv[2])
           PY
           done
           ls -l out
@@ -119,10 +119,11 @@ jobs:
           } > out/notes.md
           cat out/notes.md
 
+      # -cn-rc.N tags are previews for hardware testing and stay out of the stable update checks.
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           name: 3DS Recorder ${{ github.ref_name }}
           body_path: out/notes.md
           files: out/*
-          draft: true
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
