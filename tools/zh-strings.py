@@ -117,30 +117,12 @@ def main() -> int:
     for title, items in groups:
         if not items:
             continue
-        short = [i for i in items if len(i[3]) < 40 and "\n" not in i[3]]
-        long = [i for i in items if i not in short]
         lines.append(f"## {title}\n")
-        if short:
-            lines.append("| 键 | English | Українська | 中文 |")
-            lines.append("|---|---|---|---|")
-            for key, en, uk, cn in short:
-                lines.append(f"| `{key}` | {cell(en)} | {cell(uk)} | **{cell(cn)}** |")
-            lines.append("")
-        for key, en, uk, cn in long:
-            lines.append(f"**`{key}`**")
-            lines.append("")
-            lines.append("```text")
-            lines.append(f"EN  {en}".replace("\n", "\n    "))
-            lines.append(f"UK  {uk}".replace("\n", "\n    "))
-            lines.append(f"ZH  {cn}".replace("\n", "\n    "))
-            lines.append("```")
-            lines.append("")
-        notes = [(k, NOTES[k]) for k, *_ in items if k in NOTES]
-        if notes:
-            lines.append("说明：\n")
-            for key, note in notes:
-                lines.append(f"- `{key}`：{note}")
-            lines.append("")
+        lines.append("| 键 | English | Українська | 中文 | 说明 |")
+        lines.append("|---|---|---|---|---|")
+        for key, en, uk, cn in items:
+            lines.append(f"| `{key}` | {cell(en)} | {cell(uk)} | **{cell(cn)}** | {cell(NOTES.get(key, ''))} |")
+        lines.append("")
 
     lines.append("## 表外文本（各语言一律原样）\n")
     lines.append("| 位置 | 文本 |")
