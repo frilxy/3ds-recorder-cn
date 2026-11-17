@@ -30,8 +30,8 @@ tools/codecsim/codecsim
 tools/r3dconv/r3dconv
 tests/webcodecs/uploads/
 
-# Local build drop (packages copied out of CI, screenshots for a report)
-dist/
+# Local-only files: toolchain, screenshots, downloaded packages (see local/README.md)
+/local/
 
 # The development log (kept privately)
 plan.md
