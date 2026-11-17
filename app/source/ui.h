@@ -10,6 +10,8 @@
 #include <citro2d.h>
 #include <stdbool.h>
 
+#include "i18n.h"
+
 #define TOP_W 400
 #define BOTTOM_W 320
 #define SCREEN_H 240
@@ -47,6 +49,8 @@
 #define COL_FLAG_YELLOW RGBA(0xFF, 0xD7, 0x00, 0xFF)
 #define COL_US_RED      RGBA(0xB2, 0x22, 0x34, 0xFF)
 #define COL_US_BLUE     RGBA(0x3C, 0x3B, 0x6E, 0xFF)
+#define COL_CN_RED      RGBA(0xDE, 0x29, 0x10, 0xFF)
+#define COL_CN_YELLOW   RGBA(0xFF, 0xDE, 0x00, 0xFF)
 
 typedef enum { FONT_REG, FONT_BOLD } FontWeight;
 
@@ -93,8 +97,9 @@ float ui_key_hint_width(const char *key, const char *label);
 /* A key chip (R, ↓, SELECT) for the hotkey; returns its width. */
 float ui_key_chip(float x, float y, const char *key);
 /* Language switch flag, 21 x 13. */
-void ui_flag(float x, float y, bool ukraine);
-void ui_flag_sized(float x, float y, float w, bool ukraine); /* w wide, 21:13 */
+/* The language switch's emblem: the US and Ukrainian flags, a red field with a star for Chinese. */
+void ui_flag(float x, float y, Lang lang);
+void ui_flag_sized(float x, float y, float w, Lang lang); /* w wide, 21:13 */
 /* Toggle 32 x 18 at (x, y). */
 void ui_toggle(float x, float y, bool on);
 /* Status pill, right edge at x, 19 high. */

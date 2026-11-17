@@ -14,8 +14,12 @@ TARGET          := 3ds-recorder
 # The CIA's title version: raise it with each build that goes to a console, or the HOME Menu
 # keeps showing the banner it cached for the installed version.
 APP_VERSION := 1.2.0
-# "beta" for the open beta, empty for a release: shown next to the version on the panel
-APP_CHANNEL     :=
+# The installed title version, which AM shows. The bundled-font build takes one step more so that
+# installing it over the system-font build is a version change (the same split as 3dsDL_CN's).
+CIA_VERSION ?= $(APP_VERSION)
+# "beta" for the open beta, empty for a release: shown next to the version on the panel.
+# The Chinese build says "cn" so what is installed is never mistaken for the upstream release.
+APP_CHANNEL     := cn
 APP_TITLE       := 3DS Recorder
 APP_DESCRIPTION := Records the whole console
 APP_AUTHOR      := 3ds-screen-recorder
@@ -29,6 +33,8 @@ INCLUDES        := source ../codec/include ../prep/include ../tools/r3dconv ../t
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS   := -g -Wall -Wextra -O2 -mword-relocations -ffunction-sections $(ARCH) -std=gnu11
 CFLAGS   += $(INCLUDE) -D__3DS__ -DAPP_VERSION=\"$(APP_VERSION)\" -DAPP_CHANNEL=\"$(APP_CHANNEL)\"
+# The Chinese build starts in Chinese (i18n.c: CN_BUILD); drop this line and it starts in English.
+CFLAGS   += -DCN_BUILD
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS     := -lcitro2d -lcitro3d -lctru -lm
@@ -68,13 +74,13 @@ $(BUILD):
 # assets/logo.bcma.lz (signed, from tools/make-art.sh); without it, makerom's stock homebrew one.
 # cia-stock: the same with the stock splash, which tools/make-art.sh reworks.
 CIA_LOGO := $(if $(wildcard assets/logo.bcma.lz),-logo assets/logo.bcma.lz)
-VERSION_PARTS := $(subst ., ,$(APP_VERSION))
+VERSION_PARTS := $(subst ., ,$(CIA_VERSION))
 cia: all
 	@test -f assets/banner.bnr || { echo "assets/banner.bnr missing: run tools/make-art.sh on the Mac"; exit 1; }
 	makerom -f cia -o $(TARGET).cia -target t -exefslogo $(CIA_LOGO) -rsf cia.rsf -elf $(TARGET).elf \
 		-icon $(TARGET).smdh -banner assets/banner.bnr \
 		-major $(word 1,$(VERSION_PARTS)) -minor $(word 2,$(VERSION_PARTS)) -micro $(word 3,$(VERSION_PARTS))
-	python3 ../tools/cia_version.py $(TARGET).cia $(APP_VERSION)
+	python3 ../tools/cia_version.py $(TARGET).cia $(CIA_VERSION)
 	@echo "built ... $(TARGET).cia $(if $(CIA_LOGO),(own splash),(stock splash))"
 
 cia-stock: all
