@@ -233,11 +233,17 @@ static void draw_cut(float x, float y, float width, float px, FontWeight weight,
     ui_text(x, y, px, weight, color, buf);
 }
 
-/* Bytes of a Latin word (a path, "MP4", "Wi-Fi"): they must not be split. */
-static bool u8_word(unsigned char c)
+/* A character a word may be made of: a word is never broken in the middle. Latin, digits and the
+ * punctuation that holds paths and sizes together, plus the other alphabets the app is translated
+ * into (Cyrillic for Ukrainian, Latin Extended for accented letters). Chinese, kana and their
+ * punctuation are not word characters — those lines break between any two characters. */
+static bool word_char(unsigned cp)
 {
-    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_' ||
-           c == '/' || c == '.' || c == '+' || c == '%' || c == '=' || c == ':' || c == '\'';
+    if (cp < 0x80)
+        return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || cp == '-' ||
+               cp == '_' || cp == '/' || cp == '.' || cp == '+' || cp == '%' || cp == '=' || cp == ':';
+    return (cp >= 0x00C0 && cp <= 0x024F) || (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x0370 && cp <= 0x052F) ||
+           (cp >= 0x1E00 && cp <= 0x1EFF);
 }
 
 /* A line may not start with closing punctuation nor end with an opening one (Chinese typography:
@@ -292,15 +298,19 @@ static float wrap(float x, float y, float width, float px, FontWeight weight, u3
             p++;
             continue;
         }
-        /* one unit: a space, a whole Latin word, or one character of any other script */
+        /* one unit: a space, one whole word (Latin, Cyrillic, digits), or one Chinese character */
         const char *unit = p;
-        size_t unit_len;
-        if ((unsigned char)*p < 0x80 && u8_word((unsigned char)*p)) {
-            while (*p && (unsigned char)*p < 0x80 && u8_word((unsigned char)*p))
-                p++;
+        size_t unit_len = u8_len(p);
+        if (word_char(u8_code(p, unit_len))) {
+            p += unit_len;
+            while (*p) {
+                const size_t n = u8_len(p);
+                if (!word_char(u8_code(p, n)))
+                    break;
+                p += n;
+            }
             unit_len = (size_t)(p - unit);
         } else {
-            unit_len = u8_len(p);
             p += unit_len;
         }
         if (unit_len >= sizeof(line) - line_len - 1) { /* a line of its own; keep the text intact */
