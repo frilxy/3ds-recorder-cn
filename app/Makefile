@@ -13,7 +13,7 @@ include $(DEVKITARM)/3ds_rules
 TARGET          := 3ds-recorder
 # The CIA's title version: raise it with each build that goes to a console, or the HOME Menu
 # keeps showing the banner it cached for the installed version.
-APP_VERSION := 1.2.0
+APP_VERSION := 1.3.0
 # The installed title version, which AM shows. The bundled-font build takes one step more so that
 # installing it over the system-font build is a version change (the same split as 3dsDL_CN's).
 CIA_VERSION ?= $(APP_VERSION)
