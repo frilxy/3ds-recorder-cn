@@ -36,7 +36,7 @@ static const Rect TILE[4] = {{12, 12, 144, 94}, {164, 12, 144, 94}, {12, 114, 14
 static Rect flag_btn(void) { return (Rect){281, 213, 27, 19}; }
 /* The languages, in the order the flag cycles them. Each names itself in its own script; the
  * first-run screen shows every prompt, so it is readable before the choice is made. */
-static const char *const LANG_NAME[LANG_COUNT] = {"English", "Українська", "中文"};
+static const char *const LANG_NAME[LANG_COUNT] = {"English", "Українська", "简体中文"};
 static const char *const LANG_PROMPT[LANG_COUNT] = {"Choose your language", "Оберіть мову", "选择语言"};
 /* The first tile holds two switches, one under the other: the recorder, and its replay buffer */
 static const Rect TILE_REC = {12, 12, 144, 46}, TILE_REPLAY = {12, 60, 144, 46};

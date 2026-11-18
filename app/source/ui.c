@@ -647,12 +647,13 @@ float ui_key_chip(float x, float y, const char *key)
  * for Chinese the red field with a star (at this size the flag's four small stars would be dots). */
 void ui_flag(float x, float y, Lang lang) { ui_flag_sized(x, y, 21, lang); }
 
-/* A five-pointed star of radius r, as a fan of triangles (no sprite needed). */
-static void star(float cx, float cy, float r, u32 color)
+/* A five-pointed star of radius r, as a fan of triangles (no sprite needed). rot turns it: 0 has a
+ * point straight up, which is how the flag's big star stands. */
+static void star(float cx, float cy, float r, float rot, u32 color)
 {
-    float px = cx, py = cy - r;
+    float px = cx + cosf(rot - (float)M_PI / 2) * r, py = cy + sinf(rot - (float)M_PI / 2) * r;
     for (int i = 1; i <= 10; i++) {
-        const float a = -M_PI / 2 + (float)i * M_PI / 5;
+        const float a = rot - (float)M_PI / 2 + (float)i * M_PI / 5;
         const float rad = i % 2 ? r * 0.42f : r;
         const float vx = cx + cosf(a) * rad, vy = cy + sinf(a) * rad;
         C2D_DrawTriangle(cx, cy, color, px, py, color, vx, vy, color, UI_DEPTH);
@@ -671,7 +672,19 @@ void ui_flag_sized(float x, float y, float w, Lang lang)
     }
     if (lang == LANG_ZH) {
         ui_rect(x, y, w, h, COL_CN_RED);
-        star(x + w * 0.28f, y + h * 0.36f, h * 0.26f, COL_CN_YELLOW);
+        /* The flag's own 30x20 layout: the big star's centre at (5,5) with radius 3, the four small
+         * ones at (10,2), (12,4), (12,7), (10,9) with radius 1, each turned so a point aims at the
+         * big star. On the panel's 21x13 switch a small star is under a pixel, so it gets a floor —
+         * the position and the turn are still the flag's. */
+        const float ux = w / 30.0f, uy = h / 20.0f;
+        const float bx = x + 5 * ux, by = y + 5 * uy, big = 3 * uy;
+        static const float gx[4] = {10, 12, 12, 10}, gy[4] = {2, 4, 7, 9};
+        star(bx, by, big, 0, COL_CN_YELLOW);
+        for (int i = 0; i < 4; i++) {
+            const float sx = x + gx[i] * ux, sy = y + gy[i] * uy;
+            const float r = uy > 0.55f ? uy : 0.55f;
+            star(sx, sy, r, atan2f(by - sy, bx - sx), COL_CN_YELLOW);
+        }
         return;
     }
     for (int i = 0; i < 7; i++)
