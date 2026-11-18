@@ -1,5 +1,5 @@
 > **简体中文版 / Simplified Chinese (this fork)**: the UI is translated into Simplified Chinese,
-> switched by the same flag as English and Ukrainian (`English → Українська → 中文`). The Chinese
+> switched by the same flag as English and Ukrainian (`English → Українська → 简体中文`). The Chinese
 > text is drawn with the console's own font; no font file is bundled. See [README.cn.md](README.cn.md).
 > Upstream: [BolgarMaxym97/3ds-recorder](https://github.com/BolgarMaxym97/3ds-recorder).
 

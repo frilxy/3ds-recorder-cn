@@ -671,7 +671,15 @@ void ui_flag_sized(float x, float y, float w, Lang lang)
     }
     if (lang == LANG_ZH) {
         ui_rect(x, y, w, h, COL_CN_RED);
-        star(x + w * 0.28f, y + h * 0.36f, h * 0.26f, COL_CN_YELLOW);
+        /* One big star and the flag's four small ones. The small ones are a little larger than the
+         * flag's own proportions: at the 21x13 of the panel's switch the true size would be a dot. */
+        const float big = h * 0.26f;
+        const float small = big * 0.42f;
+        static const float sx[4] = {0.44f, 0.55f, 0.55f, 0.44f};
+        static const float sy[4] = {0.17f, 0.30f, 0.48f, 0.61f};
+        star(x + w * 0.28f, y + h * 0.36f, big, COL_CN_YELLOW);
+        for (int i = 0; i < 4; i++)
+            star(x + w * sx[i], y + h * sy[i], small, COL_CN_YELLOW);
         return;
     }
     for (int i = 0; i < 7; i++)
