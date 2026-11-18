@@ -41,6 +41,7 @@ static u32 g_oldLimit;
 static bool g_limitSet;
 static int g_shareGot;
 static volatile bool g_busy;        /* a job is open and not held */
+static volatile u64 g_idleSince;    /* nothing to do (or held) since then, ms; 0 while working */
 #define CORE1_IDLE 5     /* % of core 1 with no job: the least APT takes (0 is refused, E0E01BF4) */
 #define CORE1_HELD 5     /* a job open but held: the producer must still reach its wait (a thread
                             frozen inside malloc or a file call would block the others) */
@@ -182,16 +183,18 @@ static bool recording(void)
     return was;
 }
 
-static void delete_made(const char *name)
+static void delete_outputs(const char *name, int n)
 {
     /* "join": its link to the recording it continues (join.h), which goes with it */
     static const char *const ext[] = {"mp4", "mp4.part", "ptbl", "prep", "join"};
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < n; i++) {
         char path[96];
         prepare_path(path, sizeof(path), name, ext[i]);
         remove(path);
     }
 }
+
+static void delete_made(const char *name) { delete_outputs(name, 5); }
 
 /* A request to forget `name` (gallery delete): answered when its job is not open. */
 static bool take_forget(const char *open)
@@ -465,6 +468,35 @@ static void joined(const char *first, const char *next, const char *link)
     g_clipsDone++;   /* the gallery reads its list again */
 }
 
+/* The newest recording named after `first` and before `next` (out: its name), if any: a part of
+   the same session whose own join failed. A later part's link still names the session's first file,
+   and joining that one to it left the failed part out, in the wrong order. */
+static bool part_between(const char *first, const char *next, char *out)
+{
+    Handle dir = 0;
+    if (R_FAILED(FSUSER_OpenDirectory(&dir, recorder_archive(), fsMakePath(PATH_ASCII, REC_FILES_FS))))
+        return false;
+    static FS_DirectoryEntry e[16];
+    u32 got = 0;
+    out[0] = 0;
+    while (R_SUCCEEDED(FSDIR_Read(dir, &got, 16, e)) && got > 0)
+        for (u32 i = 0; i < got; i++) {
+            if ((e[i].attributes & FS_ATTRIBUTE_DIRECTORY) || strcmp(e[i].shortExt, "R3D") != 0)
+                continue;
+            char it[24];
+            u32 k = 0;
+            for (; k + 1 < sizeof(it) && e[i].name[k]; k++)
+                it[k] = (char)e[i].name[k];
+            it[k] = 0;
+            if (k != 19 || !is_rec_name(it))
+                continue;
+            if (strcmp(it, first) > 0 && strcmp(it, next) < 0 && strcmp(it, out) > 0)
+                memcpy(out, it, 20);   /* k == 19: the name and its 0 */
+        }
+    FSDIR_Close(dir);
+    return out[0] != 0;
+}
+
 /* One link handled; true when there was one. Nothing is changed in place (join.h): both
    recordings stay as they are until the joined one is whole and checked. */
 static bool join_one(void)
@@ -481,6 +513,22 @@ static bool join_one(void)
         kept_apart(next);
         app_log("join %s: the link names \"%s\": not now", next, first);
         return true;
+    }
+    {
+        char mid[20];
+        if (part_between(first, next, mid)) {
+            /* the link names the part before it instead: joined in order, after that one */
+            FILE *f = fopen(link, "wb");
+            const bool ok = f && fwrite(mid, 1, 19, f) == 19;
+            if (f)
+                fclose(f);
+            app_log("join %s: %s lies between it and %s: linked to it instead%s", next, mid, first, ok ? "" : " (NOT WRITTEN)");
+            if (!ok) {
+                join_fail(next);
+                kept_apart(next);
+            }
+            return true;
+        }
     }
     prepare_path(a, sizeof(a), first, "r3d");
     prepare_path(b, sizeof(b), next, "r3d");
@@ -529,7 +577,7 @@ static bool join_one(void)
         if (g_quit || join_forgotten()) {
             remove(part);
             rc = JOIN_STOPPED;
-        } else if (r3d_join_commit(a, b, part, old, mark) == 0) {
+        } else if ((delete_outputs(first, 4), delete_outputs(next, 4), r3d_join_commit(a, b, part, old, mark) == 0)) {
             joined(first, next, link);
             app_log("join %s + %s: one recording now, %llu MB, %llu s", first, next, (unsigned long long)(need >> 20),
                     (unsigned long long)((osGetTime() - t0) / 1000));
@@ -560,6 +608,12 @@ static bool join_one(void)
     if (rc == JOIN_STOPPED)
         take_forget(NULL);   /* a delete of one of them waits for this */
     return true;
+}
+
+static void mark_idle(void)
+{
+    if (!g_idleSince)
+        g_idleSince = osGetTime();
 }
 
 static void sleep_us(u32 us)
@@ -699,12 +753,14 @@ static void thread_main(void *arg)
             continue;
         }
         if (held()) { /* the producer stops by itself once the queue is full */
+            mark_idle();
             set_busy(false);
             svcSleepThread(200 * 1000 * 1000);
             continue;
         }
         if (!job && osGetTime() - clipLook > 5000) { /* clips first: they are recordings only after this */
             if (unwrap_clip()) {
+                g_idleSince = 0;
                 scanned = 0;
                 continue;
             }
@@ -712,6 +768,7 @@ static void thread_main(void *arg)
         }
         if (!job && osGetTime() - joinLook > 5000) { /* then continuations: one recording before its MP4 */
             if (join_one()) {
+                g_idleSince = 0;
                 scanned = 0;
                 continue;
             }
@@ -723,10 +780,12 @@ static void thread_main(void *arg)
         }
         if (!job) {
             if (!pick(name)) {
+                mark_idle();
                 set_busy(false);
                 svcSleepThread(500 * 1000 * 1000);
                 continue;
             }
+            g_idleSince = 0;
             char src[96], base[96], err[128];
             prepare_path(src, sizeof(src), name, "r3d");
             base_of(base, sizeof(base), name);
@@ -881,6 +940,14 @@ void prepare_stop(void)
 bool prepare_busy(void)
 {
     return g_busy;
+}
+
+u32 prepare_idle_ms(void)
+{
+    const u64 since = g_idleSince;
+    if (!g_thread)
+        return UINT32_MAX;
+    return since ? (u32)(osGetTime() - since) : 0;
 }
 
 void prepare_hold(u32 bit, bool on)
