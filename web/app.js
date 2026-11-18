@@ -8,6 +8,12 @@
  *         only to https pages; the console serves http): MP4 where the browser writes it, else WebM
  *   none  only the original .r3d
  * The download runs ahead of the conversion; both pause for each other, so memory stays small.
+ *
+ * Local mode (<html data-mode="local">, the GitHub Pages build of tools/build-web.py --local): no
+ * console. A .r3d from the SD card is dropped on the page or picked, read from the disk instead of
+ * downloaded and turned into a video the same way. The file never leaves the computer. Two options
+ * there, for editing: the size (1x, or 2x / 3x with sharp pixels: players smooth a small video
+ * when they stretch it) and the sound as recorded (no treble cut). The live way stays 1x.
  */
 (function () {
   'use strict';
@@ -35,6 +41,13 @@
       c2: 'Download to the phone', direct: 'Download directly', directLink: 'or download directly',
       big: 'A long video (%1): the phone\'s browser downloads it by itself, look in its downloads. Keep the console on the “Download” screen, lid open.',
       diag: 'Log for the developer (.txt)',
+      pick: 'Drop a .r3d here or click to choose', pickHint: 'From the SD card: /3ds/recorder/recordings',
+      privacy: 'The file stays on your computer: the browser makes the video, nothing is uploaded.',
+      read: 'Read the file', notR3d: 'This is not a 3DS Recorder recording (.r3d).',
+      rpl: 'This is a Replay buffer, not a recording. Save the clip on the console (Replay hotkey) and convert the .r3d it makes.',
+      optScale: 'Size', optAudio: 'Sound', eqOn: 'Like the speaker', eqOff: 'As recorded',
+      scaleHint: '1× is the 3DS\'s own size (400×480). 2× and 3× keep the pixels sharp in editors and on big screens; the file is bigger.',
+      fastPc: 'fast: the computer\'s video encoder', readErr: 'Could not read the file (%1).', failedLocal: 'Could not make the video (%1).', again: 'Convert another file',
     },
     uk: {
       length: 'Тривалість', size: 'Розмір', eta: 'Передача', s1: 'Завантаження з консолі', s2: 'Робимо відео',
@@ -57,6 +70,13 @@
       c2: 'Завантаження на телефон', direct: 'Завантажити напряму', directLink: 'або завантажити напряму',
       big: 'Довге відео (%1): браузер телефона сам його завантажить — дивіться в його завантаженнях. Тримайте консоль на екрані «Завантажити» з відкритою кришкою.',
       diag: 'Журнал для розробника (.txt)',
+      pick: 'Перетягніть сюди .r3d або натисніть, щоб вибрати', pickHint: 'З SD-картки: /3ds/recorder/recordings',
+      privacy: 'Файл лишається на вашому комп\'ютері: відео робить браузер, нічого не вивантажується.',
+      read: 'Читаємо файл', notR3d: 'Це не запис 3DS Recorder (.r3d).',
+      rpl: 'Це буфер Повтору, а не запис. Збережіть кліп на консолі (комбінація Повтору) і сконвертуйте .r3d, який вона створить.',
+      optScale: 'Розмір', optAudio: 'Звук', eqOn: 'Як у динаміку', eqOff: 'Як записано',
+      scaleHint: '1× — рідний розмір 3DS (400×480). 2× і 3× зберігають чіткі пікселі в редакторах і на великих екранах; файл більший.',
+      fastPc: 'швидко: відеокодер комп\'ютера', readErr: 'Не вдалося прочитати файл (%1).', failedLocal: 'Не вдалося зробити відео (%1).', again: 'Сконвертувати інший файл',
     },
     zh: {
       length: '时长', size: '大小', eta: '传输', s1: '从主机下载', s2: '生成视频',
@@ -95,17 +115,20 @@
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isAndroid = /Android/.test(ua);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const LOCAL = document.documentElement.dataset.mode === 'local';
 
   // the QR code names the recording; the address typed by hand (shown under the code) does not:
   // then it is the one the console offers
   let name = new URLSearchParams(location.search).get('f');
   let info = null;
+  let localFile = null; // local mode: the File being converted
+  const opts = { scale: 1, eq: true }; // local mode: the size and the treble cut (remembered in the browser)
 
   // One line into the console's app.log: what the phone did, so a test far away needs no
   // questions afterwards (the "Log for the developer" file has it). Never fails the page.
   let reports = 0;
   function report(msg) {
-    if (++reports > 200) return;
+    if (LOCAL || ++reports > 200) return; // local: no console to tell
     try {
       fetch('/api/log?m=' + encodeURIComponent(String(msg).slice(0, 300)), { cache: 'no-store' }).catch(() => {});
     } catch (e) { /* no fetch */ }
@@ -253,6 +276,24 @@
     }
   }
 
+  // Local mode: the same interface as Download, the bytes read from a File in order.
+  class FileSource {
+    constructor(file, feed, progress) {
+      this.file = file; this.feed = feed; this.progress = progress;
+      this.got = 0;
+      this.t0 = performance.now();
+    }
+    async run() {
+      const size = this.file.size;
+      for (let off = 0; off < size; off += CHUNK) {
+        const d = new Uint8Array(await this.file.slice(off, Math.min(off + CHUNK, size)).arrayBuffer());
+        for (let p = 0; p < d.length; p += FEED) await this.feed(d.subarray(p, p + FEED));
+        this.got += d.length;
+        this.progress(this.got, size, this.got / ((performance.now() - this.t0) / 1000));
+      }
+    }
+  }
+
   /* ------------------------------------------------------------ fast: WebCodecs */
 
   // Safari (iOS 18) gives the AAC decoderConfig.description as a whole ES_Descriptor (tag 0x03)
@@ -279,13 +320,15 @@
     return find(0, b.length, 0x05) || b;
   }
 
-  async function fastSupport(height, fps, audio) {
+  async function fastSupport(width, height, fps, audio) {
     if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') return null;
     if (audio && (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined')) return null;
+    if (width > 400 && typeof OffscreenCanvas === 'undefined') return null; // the upscale draws on one
     let codec = null;
-    for (const c of ['avc1.4d401f', 'avc1.42e01f', 'avc1.640028']) {
+    const lv = Math.ceil(width / 16) * Math.ceil(height / 16) > 3600 ? '28' : '1f'; // level 3.1 up to 1280x720, else 4.0
+    for (const c of ['avc1.4d40' + lv, 'avc1.42e0' + lv, 'avc1.640028']) {
       try {
-        const r = await VideoEncoder.isConfigSupported({ codec: c, width: 400, height, bitrate: 2500000, framerate: fps });
+        const r = await VideoEncoder.isConfigSupported({ codec: c, width, height, bitrate: 2500000, framerate: fps });
         if (r.supported) { codec = c; break; }
       } catch (e) { /* next */ }
     }
@@ -325,25 +368,33 @@
     }
   }
 
-  function fastConvert(hdr, codec) {
+  function fastConvert(hdr, codec, scale) {
+    const W = 400 * scale, H = hdr.height * scale;
     const target = new Mp4Muxer.ArrayBufferTarget();
     const muxer = new Mp4Muxer.Muxer({
       target,
-      video: { codec: 'avc', width: 400, height: hdr.height, frameRate: hdr.fps },
+      video: { codec: 'avc', width: W, height: H, frameRate: hdr.fps },
       audio: hdr.audio ? { codec: 'aac', numberOfChannels: 2, sampleRate: AAC_RATE } : undefined,
       fastStart: 'in-memory',
       firstTimestampBehavior: 'offset',
     });
     let error = null;
-    const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => { error = e; } });
-    venc.configure({ codec, width: 400, height: hdr.height, bitrate: 3500000, framerate: hdr.fps, latencyMode: 'quality', avc: { format: 'avc' } });
+    // a muxer error inside the callback (a timestamp going back) is kept, not lost: the file would be broken
+    const venc = new VideoEncoder({ output: (c, m) => { try { muxer.addVideoChunk(c, m); } catch (e) { error = error || e; } }, error: (e) => { error = e; } });
+    // the upscaled pixels are flat blocks: they need far less than scale^2 times the bits
+    venc.configure({ codec, width: W, height: H, bitrate: [0, 3500000, 8000000, 12000000][scale], framerate: hdr.fps, latencyMode: 'quality', avc: { format: 'avc' } });
+    // 2x / 3x: each picture drawn bigger with no smoothing (nearest neighbour), on the GPU
+    const small = scale > 1 ? new OffscreenCanvas(400, hdr.height) : null;
+    const big = scale > 1 ? new OffscreenCanvas(W, H) : null;
+    const bigCtx = big && big.getContext('2d');
+    if (bigCtx) bigCtx.imageSmoothingEnabled = false;
     let aenc = null, rs = null, aOut = 0, pend = [], pendN = 0;
     if (hdr.audio) {
       aenc = new AudioEncoder({
         output: (c, m) => {
           if (m && m.decoderConfig && m.decoderConfig.description)
             m = { ...m, decoderConfig: { ...m.decoderConfig, description: asc(m.decoderConfig.description) } };
-          muxer.addAudioChunk(c, m);
+          try { muxer.addAudioChunk(c, m); } catch (e) { error = error || e; }
         },
         error: (e) => { error = e; },
       });
@@ -366,7 +417,13 @@
         if (error) throw error;
         if (pic !== picture || !base) { // a new picture; repeats share its memory
           if (base) base.close();
-          base = new VideoFrame(rgba, { format: 'RGBA', codedWidth: 400, codedHeight: hdr.height, timestamp: 0 });
+          if (big) {
+            small.getContext('2d').putImageData(new ImageData(rgba, 400, hdr.height), 0, 0);
+            bigCtx.drawImage(small, 0, 0, W, H);
+            base = new VideoFrame(big, { timestamp: 0 });
+          } else {
+            base = new VideoFrame(rgba, { format: 'RGBA', codedWidth: 400, codedHeight: hdr.height, timestamp: 0 });
+          }
           picture = pic;
         }
         // timeUs: the picture's capture time (R3D.Converter vfr); without it the frame sits on the fps grid
@@ -578,7 +635,8 @@
     const url = '/rec/' + encodeURIComponent(name);
     let enc = null, hdr = null, firstErr = null;
     const conv = new R3D.Converter({
-      onHeader: (h) => { hdr = h; },
+      // the encoder at once: the first piece's frames and sound (~1 s) were decoded before it existed and lost
+      onHeader: (h) => { hdr = h; ensureEnc(); },
       onFrame: (rgba, i, pic, timeUs) => {
         if (!enc) return;
         enc.frame(rgba, i, pic, timeUs);
@@ -588,7 +646,7 @@
         }
       },
       onAudio: (s) => { if (enc) enc.audio(s); },
-    }, { vfr: !!mode.fast }); // the fast way stamps frames itself; the live one draws on its own clock
+    }, { vfr: !!mode.fast, eq: !LOCAL || opts.eq }); // the fast way stamps frames itself; the live one draws on its own clock
     const totalSec = info.ms / 1000;
     step(1, 'on', 0, '0%');
     step(2, 'on', 0, '', mode.label);
@@ -624,17 +682,19 @@
         await sleep(20);
       }
     })();
-    const dl = new Download(url, info.size, feed, (g, size, rate) => {
+    const progress = (g, size, rate) => {
       const left = rate ? (size - g) / rate : 0;
       step(1, g >= size ? 'done' : 'on', (g / size) * 100, Math.floor((g / size) * 100) + '%',
         `${mb(g)} / ${mb(size)} · ${(rate / 1048576).toFixed(2)} ${t('mbs')}` + (g < size ? ' · ' + t('left', duration(left)) : ''));
-    });
+    };
+    const dl = LOCAL ? new FileSource(localFile, feed, progress) : new Download(url, info.size, feed, progress);
     const go = async () => {
       try {
         await dl.run();
       } catch (e) {
         report('r3d download failed: ' + why(e));
-        fail(e.notFound ? t('notFound') : t('lost'), e.notFound ? null : go);
+        if (LOCAL) fail(t('readErr', why(e)));
+        else fail(e.notFound ? t('notFound') : t('lost'), e.notFound ? null : go);
         return;
       }
       report(`r3d downloaded: ${dl.got} B in ${((performance.now() - dl.t0) / 1000).toFixed(1)} s`);
@@ -650,7 +710,7 @@
         offer(blob);
       } catch (e) {
         report('browser video failed: ' + why(e));
-        fail(t('failed', e && e.message ? e.message : e));
+        fail(t(LOCAL ? 'failedLocal' : 'failed', e && e.message ? e.message : e));
       }
     };
     go();
@@ -661,7 +721,7 @@
     const ext = blob.type.indexOf('webm') >= 0 ? 'webm' : 'mp4';
     const href = URL.createObjectURL(blob);
     const m = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(name) || [];
-    const fname = `3DS ${m[1]}-${m[2]}-${m[3]} ${m[4]}-${m[5]}-${m[6]}.${ext}`;
+    const fname = m[0] ? `3DS ${m[1]}-${m[2]}-${m[3]} ${m[4]}-${m[5]}-${m[6]}.${ext}` : `${name.replace(/\.[^.]*$/, '')}.${ext}`;
     $('preview').src = href;
     const save = $('save');
     save.href = href;
@@ -681,9 +741,11 @@
       save.after(b);
     }
     save.addEventListener('click', () => { report('save tapped'); step(3, 'done'); });
+    if (LOCAL) $('again').hidden = false;
   }
 
   async function main() {
+    if (LOCAL) { localMain(); return; }
     document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
     report(`open ${name} | ${ua} | screen ${screen.width}x${screen.height}@${devicePixelRatio} | ${navigator.language}` +
       ` | mem ${navigator.deviceMemory || '?'} GB | secure ${window.isSecureContext} | VideoEncoder ${typeof VideoEncoder}` +
@@ -712,6 +774,66 @@
     step(3, '');
     if (info.prep && info.prep !== 'failed') consoleVideo();
     else browserVideo();
+  }
+
+  /* ------------------------------------------------------------ local mode: a file on the computer */
+
+  function localMain() {
+    if (/^uk\b/i.test(navigator.language || '')) { L = TEXT.uk; document.documentElement.lang = 'uk'; }
+    document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+    for (const id of ['card', 'steps', 'raw', 'sd', 'diag']) $(id).hidden = true;
+    $('s1').querySelector('b').textContent = t('read');
+    $('pick').hidden = false;
+    localOptions();
+    const drop = $('drop'), input = $('file');
+    input.addEventListener('change', () => { if (input.files[0]) openLocal(input.files[0]); });
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      if (e.dataTransfer.files[0]) openLocal(e.dataTransfer.files[0]);
+    });
+  }
+
+  // The two segmented choices; remembered per browser (storage may be off: then the defaults)
+  function localOptions() {
+    try { Object.assign(opts, JSON.parse(localStorage.getItem('r3d-opts') || '{}')); } catch (e) { /* defaults */ }
+    if (![1, 2, 3].includes(opts.scale)) opts.scale = 1;
+    const seg = (id, get, set) => {
+      const btns = [...$(id).querySelectorAll('button')];
+      const mark = () => btns.forEach((b) => b.classList.toggle('on', b.dataset.v === String(get())));
+      btns.forEach((b) => b.addEventListener('click', () => {
+        set(b.dataset.v);
+        mark();
+        try { localStorage.setItem('r3d-opts', JSON.stringify(opts)); } catch (e) { /* not kept */ }
+      }));
+      mark();
+    };
+    seg('scale', () => opts.scale, (v) => { opts.scale = Number(v); });
+    seg('eq', () => (opts.eq ? 1 : 0), (v) => { opts.eq = v === '1'; });
+  }
+
+  async function openLocal(file) {
+    $('error').hidden = true;
+    let hdr = null;
+    try { // the header (32 bytes) through the decoder itself: it knows every version
+      const head = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+      if (head.length >= 4 && new DataView(head.buffer).getUint32(0, true) === 0x52443352) { fail(t('rpl')); return; } // R3DR
+      new R3D.Converter({ onHeader: (h) => { hdr = h; } }).push(head);
+    } catch (e) { /* not a .r3d */ }
+    if (!hdr) { fail(t('notR3d')); return; }
+    localFile = file;
+    name = file.name;
+    info = { name, size: file.size, ms: 0, both: hdr.both, fps: hdr.fps, audio: hdr.audio };
+    $('pick').hidden = true;
+    $('card').hidden = false;
+    $('steps').hidden = false;
+    $('when').textContent = when(name);
+    $('fname').textContent = name + ' · ' + mb(file.size);
+    $('stats').hidden = true; // the length is known only at the end:
+    $('b2').parentNode.hidden = true; // step 2 shows the video's time without a bar
+    browserVideo();
   }
 
   /* ------------------------------------------------------------ the console's MP4 */
@@ -789,18 +911,23 @@
   /* ------------------------------------------------------------ the browser makes it */
 
   async function browserVideo() {
-    $('size').textContent = mb(info.size);
-    const etaSec = info.size / (WIFI_KBS * 1024);
-    $('eta').textContent = duration(etaSec);
-    if (etaSec > 10 * 60) show('long', t('long', duration(etaSec)));
+    if (!LOCAL) {
+      $('size').textContent = mb(info.size);
+      const etaSec = info.size / (WIFI_KBS * 1024);
+      $('eta').textContent = duration(etaSec);
+      if (etaSec > 10 * 60) show('long', t('long', duration(etaSec)));
+    }
     step(1, 'on', 0, t('waiting'));
     step(2, '', 0, t('waiting'));
 
     const height = info.both ? 480 : 240;
-    const codec = await fastSupport(height, info.fps || 30, info.audio);
+    let scale = LOCAL ? opts.scale : 1;
+    let codec = await fastSupport(400 * scale, height * scale, info.fps || 30, info.audio);
+    if (!codec && scale > 1) { scale = 1; codec = await fastSupport(400, height, info.fps || 30, info.audio); } // too big for this encoder
     if (codec) {
       report('browser video: fast, ' + JSON.stringify(codec).slice(0, 120));
-      run({ fast: true, label: t('fast'), make: (hdr) => fastConvert(hdr, codec) });
+      run({ fast: true, label: t(LOCAL ? 'fastPc' : 'fast') + (scale > 1 ? ` · ${400 * scale}×${height * scale}` : ''),
+        make: (hdr) => fastConvert(hdr, codec, scale) });
       return;
     }
     const mime = liveType();
