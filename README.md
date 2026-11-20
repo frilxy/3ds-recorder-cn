@@ -1,7 +1,14 @@
-> **简体中文版 / Simplified Chinese (this fork)**: the UI is translated into Simplified Chinese,
-> switched by the same flag as English and Ukrainian (`English → Українська → 简体中文`). The Chinese
-> text is drawn with the console's own font; no font file is bundled. See [README.cn.md](README.cn.md).
-> Upstream: [BolgarMaxym97/3ds-recorder](https://github.com/BolgarMaxym97/3ds-recorder).
+> **ARCHIVED / 已归档.** This fork is closed because upstream now does the Chinese itself: **v1.5.0
+> ships Simplified Chinese** — `app/source/lang/zh-Hans.c` (all 270 keys), per-language Noto Sans CJK
+> fonts (`zhs_500/700.bcfnt`, real bold, no missing glyphs), CJK line breaking (`textbreak.c`), a
+> terminology glossary taken from the iQue 3DS XL manual, and `zh-Hans` texts for the phone page.
+> Install the official release instead:
+> [BolgarMaxym97/3ds-recorder/releases](https://github.com/BolgarMaxym97/3ds-recorder/releases).
+>
+> 本分支停在 v1.4.0，原因是上游 v1.5.0 起自带简体中文（字库、断行、术语表都做了），
+> 我们的汉化已无必要。**请改用上游**；从我们的包覆盖安装即可（同一 TitleID），
+> 装完在「设置 → 语言」重选一次「简体中文」（`lang=zh` → 上游的 `lang=zh-Hans`）。
+> 仓库已归档，只读。历史版本仍在 Releases 里。细节见 [README.cn.md](README.cn.md)。
 
 <h1 align="center">3DS Recorder</h1>
 
