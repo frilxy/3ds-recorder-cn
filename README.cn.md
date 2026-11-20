@@ -1,73 +1,38 @@
-# 3DS Recorder 简体中文版
+# 3DS Recorder 简体中文版（已归档）
 
-这是 [BolgarMaxym97/3ds-recorder](https://github.com/BolgarMaxym97/3ds-recorder) 的汉化分支：
-把界面译成简体中文，语言切换与上游原有的 English / Українська 并列，仍是同一个开关。
+**本项目已归档，不再维护。** 原因是上游自己做中文了：
 
-提供两个包，界面完全一样，只差中文用哪份字库：
+> 上游 **v1.5.0** 起自带简体中文 —— `app/source/lang/zh-Hans.c`（270 个键全覆盖）、按语种加载的
+> Noto Sans CJK 字库（`zhs_500/700.bcfnt`，有真粗体、不缺字）、CJK 按字断行与避头尾
+>（`textbreak.c`）、以神游 iQue 3DS XL 官方说明书为准的术语表、以及手机页的 `zh-Hans` 文案。
+> 我们要解决的问题（没有中文）它已经解决，而且比我们做得完整。
 
-| 包 | 字库 | 适合 |
-|---|---|---|
-| `-cn` | 主机的共享字库 | 中国版主机（或装过 `cbf_zh-Hans-CN` 的机器）；包小 |
-| `-cnwithfont` | 包里带 `hanfont.bcfnt`（iQue 国行共享字库，2.8 MB） | 任何区域的主机，简体字齐全 |
+**请改用上游**：https://github.com/BolgarMaxym97/3ds-recorder/releases
 
-## 用起来
+## 从我们的包换到上游
 
-- 面板右下角的图标就是语言开关，点一下按 `English → Українська → 简体中文 → English` 循环；
-  手柄上按 `X` 也是同一个操作。
-- 「设置 → 语言」里可以直接选三种语言之一。
-- 首次运行的语言选择页有三张卡片，选「中文」后写入 `config.ini` 的 `lang=zh`。
-- CJK 换行按字断行，`，。、；：！？）》」』】` 之类不会跑到行首。
+- **可以直接覆盖安装**：两边是同一个 TitleID（`000400000b3da300`），FBI 装上游的 CIA 就是替换本软件；
+  SD 卡上的 `/3ds/recorder/`（设置、录像、日志）不受影响。
+- **语言要重选一次**：我们写的是 `config.ini` 的 `lang=zh`，上游只认 `zh-Hans`（还有 `zh-Hant`、`ja`…），
+  所以换过去之后界面会回到英文——去「设置 → 语言」重新选「简体中文」即可。
+- **录制器模块会自动更新**：路径与 title 没变（`/luma/sysmodules/0004013000F1D302.cxi`），新程序打开时
+  会替换并重启它；开机自启写下的 exheader 覆盖不用重做。
+- 上游 1.5 的包更大（约 7.5 MB），因为它带中日繁三套字库；我们那个 `-cnwithfont` 变体因此不再需要。
 
-## 字库说明
+## 这个仓库曾经做了什么（1.2.0 – 1.4.0）
 
-`-cn` 版用主机自己的共享字库（HOME 菜单用的那份）绘制中文，包很小，但**能显示哪些汉字由主机的
-字库决定**：中国版主机（以及把共享字库换成 `cbf_zh-Hans-CN` 的机器）汉字齐全；其他区域的主机用的是
-`cbf_std`，日文汉字大多有，部分简体专用字可能缺字。
+在没有官方中文的时候，跟着上游 1.2.0 / 1.3.0 / 1.4.0 各发过一版汉化：
 
-`-cnwithfont` 版把同一份 `cbf_zh-Hans-CN` 放进 RomFS（`app/assets/hanfont.bcfnt`，2.8 MB），
-运行时由 `ui.c` 的 `bundled_font()` 在第一次画汉字时 `C2D_FontLoad` 加载，加载失败自动退回主机字库，
-所以两个版本共用同一份代码，差别只在包里有没有这个文件。做法与
-[frilxy/3dsDL_CN](https://github.com/frilxy/3dsDL_CN) 相同；字体文件版权归任天堂，仅用于自制程序
-在主机字库不全时的显示。
+- `app/source/i18n_zh.c`：一份独立的中文表（255→259 条），上游 `STRINGS(X)` 的英文/乌克兰语两列不动；
+- `Lang` 三语状态（en / uk / zh）、面板右下角的语言循环开关、首次运行的三张语言卡片；
+- 中文用主机共享字库绘制（`-cn`），另有一个把 iQue 国行字库塞进 RomFS 的 `-cnwithfont` 变体；
+- 中文按字断行、10px 以下小字号补 1px、手机下载页中文、日期按语种显示；
+- 语言图标画过五星红旗，后来按国籍标准旗面的 30×20 网格重画（一大四星）。
 
-## 汉化是怎么放进代码的
+这些在上游 1.5 里都有对应的、更完整的实现，所以本分支停在 1.4.0。
 
-上游的 `i18n.h` 用一个 `STRINGS(X)` X-macro 保存英文和乌克兰语两列。汉化没有改动这两列：
+## 历史版本
 
-- `app/source/i18n_zh.c`：新增的一份中文表，`[S_KEY] = "…"` 一条对一个键；
-- `app/source/i18n.c`：`Lang` 语言状态与查表，中文缺条时回退英文；
-- `tools/check-i18n.py`：CI 里检查「每个键都有中文」且 `%s`/`%u` 这类占位符与英文一致；
-- `app/source/ui.c`：中文时字形改走系统字库，并按字断行（拉丁词不拆）；
-- `web/app.js`：手机下载页也加了 `zh` 文案。
-
-所以上游升级时，改动集中在 `i18n_zh.c` 和几处语言状态代码，冲突面很小，也方便整理成
-PR 提交上游。
-
-## 自己编译
-
-仓库的 GitHub Actions（`.github/workflows/build.yml`）会在 `tools/Dockerfile` 的开发镜像里
-构建 sysmodule、Luma 插件、主程序和 CIA，产物在 Actions 运行的 Artifacts 里：
-`3ds-recorder-<版本>-cn.3dsx` / `.cia`。
-
-本地等价：
-
-```sh
-docker build -t 3dsrec-dev tools/
-docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C sysmod
-docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C plugin
-docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C app
-docker run --rm -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" 3dsrec-dev make -C app cia
-```
-
-自带字库版就是同一套代码把字库塞进 RomFS 再编一次：
-
-```sh
-cp app/assets/hanfont.bcfnt app/romfs/hanfont.bcfnt
-make -C app APP_CHANNEL=cnwithfont
-make -C app cia APP_CHANNEL=cnwithfont CIA_VERSION=1.2.1
-```
-
-`CIA_VERSION` 只改安装标题版本（AM 看到的那个），面板显示仍是 `APP_VERSION` + `APP_CHANNEL`；
-加一档是为了让自带字库版能覆盖系统字库版。
-
-不想默认中文时，去掉 `app/Makefile` 里的 `CFLAGS += -DCN_BUILD` 即可，其余行为与上游一致。
+`v1.2.0-cn`、`v1.3.0-cn`、`v1.4.0-cn` 及其预发布都还在
+[Releases](https://github.com/frilxy/3ds-recorder-cn/releases) 里，可以下载，只是不再更新。
+仓库归档后仍可读取，不能提交新内容。
